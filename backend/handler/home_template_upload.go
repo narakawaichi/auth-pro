@@ -294,10 +294,11 @@ func serveUploadedHomeTemplateAsset(c *gin.Context, installedPath string) {
 	c.Header("Content-Type", contentType)
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Referrer-Policy", "no-referrer")
-	c.Header("Access-Control-Allow-Origin", "*") // anonymous ES modules in an opaque-origin sandbox
+	c.Header("Access-Control-Allow-Origin", "*") // allow ES modules and cross-origin resources
 	c.Header("Cache-Control", "no-cache")
-	// Enforced on the response too, so direct navigation of the HTML/SVG URL carries the same policy.
-	c.Header("Content-Security-Policy", "sandbox allow-scripts allow-same-origin; default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; object-src 'none'; frame-ancestors 'self'")
+	// The template keeps full same-origin access; only safe defaults remain enforced on
+	// the response so direct navigation of the HTML/SVG URL keeps them too.
+	c.Header("Content-Security-Policy", "default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; object-src 'none'; frame-ancestors 'self'")
 	http.ServeContent(c.Writer, c.Request, name, info.ModTime(), file)
 }
 

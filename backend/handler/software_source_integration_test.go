@@ -292,7 +292,7 @@ func TestSoftwareSourceHTTPIntegration(t *testing.T) {
 			asset := invokeHandler(t, http.MethodGet, result.Data.EntryURL, nil, gin.Params{
 				{Key: "id", Value: parts[4]}, {Key: "revision", Value: parts[5]}, {Key: "filepath", Value: "/index.html"},
 			}, PublicHomeTemplateAsset)
-			if asset.Code != 200 || !strings.Contains(asset.Body.String(), "Uploaded ZIP home") || !strings.Contains(asset.Header().Get("Content-Security-Policy"), "sandbox allow-scripts") {
+			if asset.Code != 200 || !strings.Contains(asset.Body.String(), "Uploaded ZIP home") || strings.Contains(asset.Header().Get("Content-Security-Policy"), "sandbox") {
 				t.Fatalf("static asset: %s %v", asset.Body, asset.Header())
 			}
 		}

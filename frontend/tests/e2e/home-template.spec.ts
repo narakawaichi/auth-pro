@@ -216,7 +216,7 @@ test('远程模板登录沿用原请求契约与本地存储键', async ({ page 
     .toBe('test-token')
 })
 
-test('静态 ZIP 首页不叠加浮动按钮并保留沙箱与系统登录', async ({ page }) => {
+test('静态 ZIP 首页不叠加浮动按钮并保持系统登录', async ({ page }) => {
   const base = '/api/home-template/assets/99/upload-12345/'
   await mockPublicAPIs(page, {
     id: 99,
@@ -238,7 +238,7 @@ test('静态 ZIP 首页不叠加浮动按钮并保留沙箱与系统登录', asy
       headers: {
         'Access-Control-Allow-Origin': '*',
         'Content-Security-Policy':
-          "sandbox allow-scripts allow-same-origin; default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; object-src 'none'; frame-ancestors 'self'"
+          "default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; object-src 'none'; frame-ancestors 'self'"
       },
       body: isScript
         ? `
@@ -254,7 +254,7 @@ test('静态 ZIP 首页不叠加浮动按钮并保留沙箱与系统登录', asy
   const frame = page.frameLocator('iframe[title="自定义首页模板"]')
   await expect(frame.getByRole('heading', { name: 'ZIP 静态脚本已运行' })).toBeVisible()
   await expect(frame.locator('body')).toHaveAttribute('data-token', 'must-stay-private')
-  await expect(page.locator('.static-home iframe')).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin')
+  await expect(page.locator('.static-home iframe')).not.toHaveAttribute('sandbox')
   await expect(page.locator('.static-home-actions')).toHaveCount(0)
   await expect(page.getByRole('button', { name: '使用默认首页', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '登录用户中心', exact: true })).toHaveCount(0)

@@ -178,7 +178,7 @@ func TestUploadedHomeTemplateZIPAndSafeAssets(t *testing.T) {
 				t.Fatalf("asset: %d %s", response.Code, response.Body)
 			}
 			policy := response.Header().Get("Content-Security-Policy")
-			if !strings.Contains(policy, "sandbox allow-scripts") || !strings.Contains(policy, "allow-same-origin") || response.Header().Get("X-Content-Type-Options") != "nosniff" {
+			if strings.Contains(policy, "sandbox") || !strings.Contains(policy, "object-src 'none'") || response.Header().Get("X-Content-Type-Options") != "nosniff" {
 				t.Fatalf("unsafe headers: %v", response.Header())
 			}
 			for _, name := range []string{"/../secret.json", "/assets/../../secret.json", "/.env.json", "/script.php", "/missing.js"} {

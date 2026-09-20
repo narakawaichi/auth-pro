@@ -135,8 +135,9 @@ func packageContentRoot(directory string) (string, error) {
 	}
 }
 
-// IsInstalledPackageFile prevents the ordinary static server from bypassing the
-// template asset endpoint's sandbox headers when runtime data lives under the web root.
+// IsInstalledPackageFile prevents the ordinary static server from serving installed
+// template/plugin files when runtime data lives under the web root, keeping them on the
+// dedicated asset endpoint that applies the security headers.
 func IsInstalledPackageFile(filename string) bool {
 	candidates := []string{filename}
 	if resolved, err := filepath.EvalSymlinks(filename); err == nil {
