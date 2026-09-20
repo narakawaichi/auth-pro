@@ -402,3 +402,13 @@ func TestWriteOnlineUpdateScriptSupportsWebsiteRoot(t *testing.T) {
 		t.Fatalf("unexpected data directory: %s", config.GetDataDir())
 	}
 }
+
+func TestOnlineUpdateScriptCommandFallsBackOnNonLinux(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Skip("仅验证非 Linux 环境的回退行为；Linux 下是否使用 systemd-run 依赖运行环境")
+	}
+	cmd := onlineUpdateScriptCommand("U-test", "/tmp/update.sh")
+	if len(cmd.Args) < 2 || cmd.Args[0] != "/bin/sh" || cmd.Args[1] != "/tmp/update.sh" {
+		t.Fatalf("expected /bin/sh fallback, got %#v", cmd.Args)
+	}
+}

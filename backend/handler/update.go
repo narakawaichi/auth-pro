@@ -1045,7 +1045,7 @@ func executeOnlineUpdate(jobID string, manifest *onlineUpdateManifest) error {
 	if logFile != nil {
 		defer logFile.Close()
 	}
-	cmd := exec.Command("/bin/sh", scriptPath)
+	cmd := onlineUpdateScriptCommand(jobID, scriptPath)
 	cmd.Dir = config.GetDataDir()
 	if logFile != nil {
 		cmd.Stdout = logFile
@@ -1641,4 +1641,28 @@ exit 1
 
 func shellQuoteOnlineUpdate(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+// onlineUpdateScriptCommand 构造启动更新脚本的命令。
+//
+// 更新脚本内部会执行 `systemctl stop <service>` 再 `systemctl start <service>`。
+// 当后端由 systemd 管理时，脚本作为后端的子进程位于同一 cgroup，默认
+// KillMode=control-group 会让 `systemctl stop` 把整个 cgroup（包括脚本自身）
+// 一起终止，导致后续 `systemctl start` 永远不会执行，后端停掉后不再拉起。
+//
+// 此时改用 `systemd-run --scope` 把脚本放进独立的 scope 单元（独立 cgroup）
+// 运行，脚本就能在 `systemctl stop` 后存活并继续完成重启与健康检查。scope
+// 模式会继承调用进程的环境变量；非 systemd（如宝塔 nohup）环境仍直接执行脚本。
+func onlineUpdateScriptCommand(jobID string, scriptPath string) *exec.Cmd {
+	if runtime.GOOS != "linux" {
+		return exec.Command("/bin/sh", scriptPath)
+	}
+	if _, err := exec.LookPath("systemd-run"); err != nil {
+		return exec.Command("/bin/sh", scriptPath)
+	}
+	output, err := exec.Command("systemctl", "cat", config.GetServiceName()).CombinedOutput()
+	if err != nil || len(output) == 0 {
+		return exec.Command("/bin/sh", scriptPath)
+	}
+	return exec.Command("systemd-run", "--scope", "--collect", "--unit="+jobID+"-update", "/bin/sh", scriptPath)
 }
