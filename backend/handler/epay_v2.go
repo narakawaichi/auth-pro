@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -445,11 +446,13 @@ func EpayV2Notify(c *gin.Context) {
 
 	db, err := openSystemConfigDB()
 	if err != nil {
+		log.Printf("[epay-v2] 异步回调打开数据库失败: %v", err)
 		c.String(http.StatusOK, "fail")
 		return
 	}
 
 	if err := settleEpayV2Callback(db, params); err != nil {
+		log.Printf("[epay-v2] 异步回调处理失败: %s | err=%v", callbackParamSummary(params), err)
 		c.String(http.StatusOK, "fail")
 		return
 	}
@@ -465,8 +468,11 @@ func EpayV2Return(c *gin.Context) {
 	}
 
 	if db, err := openSystemConfigDB(); err == nil {
-		_ = settleEpayV2Callback(db, params)
-		db.Close()
+		if settleErr := settleEpayV2Callback(db, params); settleErr != nil {
+			log.Printf("[epay-v2] 同步回跳兜底结算失败: %s | err=%v", callbackParamSummary(params), settleErr)
+		}
+	} else {
+		log.Printf("[epay-v2] 同步回跳打开数据库失败: %v", err)
 	}
 
 	redirectURL := ""

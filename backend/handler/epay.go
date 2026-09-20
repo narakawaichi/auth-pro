@@ -238,11 +238,13 @@ func EpayNotify(c *gin.Context) {
 
 	db, err := openSystemConfigDB()
 	if err != nil {
+		log.Printf("[epay] 异步回调打开数据库失败: %v", err)
 		c.String(http.StatusOK, "fail")
 		return
 	}
 
 	if err := settleEpayCallback(db, params); err != nil {
+		log.Printf("[epay] 异步回调处理失败: %s | err=%v", callbackParamSummary(params), err)
 		c.String(http.StatusOK, "fail")
 		return
 	}
@@ -261,8 +263,11 @@ func EpayReturn(c *gin.Context) {
 
 	if db, err := openSystemConfigDB(); err == nil {
 		// 兜底结算失败时忽略错误（可能验签不通过或已由 notify 入账），仅继续跳转。
-		_ = settleEpayCallback(db, params)
-		db.Close()
+		if settleErr := settleEpayCallback(db, params); settleErr != nil {
+			log.Printf("[epay] 同步回跳兜底结算失败: %s | err=%v", callbackParamSummary(params), settleErr)
+		}
+	} else {
+		log.Printf("[epay] 同步回跳打开数据库失败: %v", err)
 	}
 
 	redirectURL := ""
@@ -888,6 +893,19 @@ func verifyEpaySign(params map[string]string, key string) bool {
 		return false
 	}
 	return sign == signEpayParams(params, key)
+}
+
+// callbackParamSummary 返回可写入日志的回调摘要，不记录签名、密钥或完整回调内容。
+func callbackParamSummary(params map[string]string) string {
+	return fmt.Sprintf("order=%q pid=%q status=%q type=%q money=%q trade_no=%q sign_type=%q",
+		strings.TrimSpace(params["out_trade_no"]),
+		strings.TrimSpace(params["pid"]),
+		strings.TrimSpace(params["trade_status"]),
+		strings.TrimSpace(params["type"]),
+		strings.TrimSpace(params["money"]),
+		strings.TrimSpace(params["trade_no"]),
+		strings.TrimSpace(params["sign_type"]),
+	)
 }
 
 func collectEpayParams(c *gin.Context) map[string]string {
