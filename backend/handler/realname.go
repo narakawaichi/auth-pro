@@ -60,11 +60,40 @@ const (
 	realnameProviderTencent    = "tencent"
 	kuaitongAuthTypeFace       = "face"
 	kuaitongAuthTypeTwoElement = "two_element"
+	// 实名生效范围：by_app 沿用按应用勾选；all 对所有应用（含今后新增）强制实名。
+	realnameScopeByApp = "by_app"
+	realnameScopeAll   = "all"
+	// 认证记录类型：init 首次认证；review 有效期内的再次核验或过期后的重新认证。
+	realnameRecordTypeInit   = "init"
+	realnameRecordTypeReview = "review"
+	// 存量实名数据处理策略：keep 保持永不过期；backfill 按认证时间补算有效期。
+	realnameLegacyKeep     = "keep"
+	realnameLegacyBackfill = "backfill"
+	// 默认有效期相关取值：0 天有效期表示永不过期。
+	defaultRealnameGraceDays  = 15
+	defaultRealnameRemindDays = 30
+	// 实名判定结果：ok 无需拦截；grace 宽限期内放行但提示复核；
+	// never 从未实名；expired 已过期且超出宽限期。
+	realnameStatusOK      = "ok"
+	realnameStatusGrace   = "grace"
+	realnameStatusNever   = "never"
+	realnameStatusExpired = "expired"
+	// 授权校验失败原因，供 verify_logs 归因与前端区分提示。
+	verifyReasonRealnameRequired = "realname_required"
+	verifyReasonRealnameExpired  = "realname_expired"
 	alipayDefaultGateway       = "https://openapi.alipay.com/gateway.do"
 	alipaySandboxGateway       = "https://openapi-sandbox.dl.alipaydev.com/gateway.do"
 	realnameInitMethod         = "datadigital.fincloud.generalsaas.face.certify.initialize"
 	realnameQueryMethod        = "datadigital.fincloud.generalsaas.face.certify.query"
 	realnameH5Prefix           = "https://certifyweb.alipay.com/certify/h5?certifyId="
+	alipayAuthModeFace         = "face" // 扫码刷脸（face.certify 系列）
+	alipayAuthModeInfo         = "info" // 实名信息验证：preconsult 录入 + 用户授权 + consult 比对
+	alipayOauthMethod          = "alipay.system.oauth.token"
+	alipayPreconsultMethod     = "alipay.user.certdoc.certverify.preconsult"
+	alipayConsultMethod        = "alipay.user.certdoc.certverify.consult"
+	alipayAuthorizeURL         = "https://openauth.alipay.com/oauth2/publicAppAuthorize.htm"
+	alipaySandboxAuthorizeURL  = "https://openauth-sandbox.dl.alipaydev.com/oauth2/publicAppAuthorize.htm"
+	alipayCallbackPath         = "/api/realname/alipay-callback"
 	kuaitongTokenURL           = "https://ai.inspirvision.cn/s/api/getAccessToken"
 	kuaitongVerifyURL          = "https://ai.inspirvision.cn/s/api/ocr/cloudCode/certificate"
 	kuaitongIDCardURL          = "https://ai.inspirvision.cn/s/api/ocr/cloudCode/IdCard"
@@ -86,6 +115,7 @@ type realnameConfig struct {
 	PrivateKey         string
 	AlipayPublicKey    string
 	Gateway            string
+	AlipayAuthMode     string // face 扫码刷脸 / info 实名信息验证（preconsult + 授权 + consult）
 	KuaitongAccessKey  string
 	KuaitongSecret     string
 	KuaitongAuthType   string
@@ -99,6 +129,20 @@ type realnameConfig struct {
 	XiaomuBaseURL      string
 	XiaomuProductMode  string
 	RequireAppIDs      map[int64]bool
+	// PR1 全局范围：by_app 按 RequireAppIDs 勾选；all 全部应用强制实名。
+	Scope string
+	// PR2 购买门槛：PurchaseRequired 购买/开通前要求实名；
+	// PurchaseCheckOwner 代理为名下用户开通时，同时要求目标用户实名。
+	PurchaseRequired   bool
+	PurchaseCheckOwner bool
+	// PR3 有效期：ValidityDays 0 表示永不过期；GraceDays 为到期后的宽限天数；
+	// RemindDays 为到期前提醒天数；AllowIdentityChange 复核是否允许更换姓名/证件。
+	ValidityDays        int
+	GraceDays           int
+	RemindDays          int
+	AllowIdentityChange bool
+	// LegacyPolicy 存量实名数据处理策略：keep 保持永不过期；backfill 按认证时间补算。
+	LegacyPolicy string
 }
 
 type realnameConfigResponse struct {
@@ -109,6 +153,7 @@ type realnameConfigResponse struct {
 	PrivateKeySet      bool              `json:"privateKeySet"`
 	AlipayPublicKey    string            `json:"alipayPublicKey"`
 	Gateway            string            `json:"gateway"`
+	AlipayAuthMode     string            `json:"alipayAuthMode"`
 	KuaitongAccessKey  string            `json:"kuaitongAccessKey"`
 	KuaitongSecretSet  bool              `json:"kuaitongSecretSet"`
 	KuaitongAuthType   string            `json:"kuaitongAuthType"`
@@ -122,6 +167,14 @@ type realnameConfigResponse struct {
 	XiaomuBaseURL      string            `json:"xiaomuBaseUrl"`
 	XiaomuProductMode  string            `json:"xiaomuProductMode"`
 	RequireAppIDs      []int64           `json:"requireAppIds"`
+	Scope              string            `json:"scope"`
+	PurchaseRequired   bool              `json:"purchaseRequired"`
+	PurchaseCheckOwner bool              `json:"purchaseCheckOwner"`
+	ValidityDays       int               `json:"validityDays"`
+	GraceDays          int               `json:"graceDays"`
+	RemindDays         int               `json:"remindDays"`
+	AllowIdentityChange bool             `json:"allowIdentityChange"`
+	LegacyPolicy       string            `json:"legacyPolicy"`
 	Apps               []realnameAppItem `json:"apps"`
 }
 
@@ -138,6 +191,7 @@ type updateRealnameConfigRequest struct {
 	PrivateKey        string  `json:"privateKey"`
 	AlipayPublicKey   string  `json:"alipayPublicKey"`
 	Gateway           string  `json:"gateway"`
+	AlipayAuthMode    string  `json:"alipayAuthMode"`
 	KuaitongAccessKey string  `json:"kuaitongAccessKey"`
 	KuaitongSecret    string  `json:"kuaitongSecret"`
 	KuaitongAuthType  string  `json:"kuaitongAuthType"`
@@ -150,6 +204,14 @@ type updateRealnameConfigRequest struct {
 	XiaomuBaseURL     string  `json:"xiaomuBaseUrl"`
 	XiaomuProductMode string  `json:"xiaomuProductMode"`
 	RequireAppIDs     []int64 `json:"requireAppIds"`
+	Scope             string  `json:"scope"`
+	PurchaseRequired  *bool   `json:"purchaseRequired"`
+	PurchaseCheckOwner *bool  `json:"purchaseCheckOwner"`
+	ValidityDays      *int    `json:"validityDays"`
+	GraceDays         *int    `json:"graceDays"`
+	RemindDays        *int    `json:"remindDays"`
+	AllowIdentityChange *bool `json:"allowIdentityChange"`
+	LegacyPolicy      string  `json:"legacyPolicy"`
 }
 
 // ensureRealnameStorage 幂等建表/建列：
@@ -164,9 +226,11 @@ func ensureRealnameStorage(db *sql.DB) error {
 		{"users", "real_name", "ALTER TABLE users ADD COLUMN real_name VARCHAR(60) DEFAULT '' COMMENT '实名姓名' AFTER nickname"},
 		{"users", "real_id_card", "ALTER TABLE users ADD COLUMN real_id_card VARCHAR(30) DEFAULT '' COMMENT '身份证号' AFTER real_name"},
 		{"users", "realname_at", "ALTER TABLE users ADD COLUMN realname_at DATETIME DEFAULT NULL COMMENT '实名认证时间' AFTER real_id_card"},
+		{"users", "realname_expires_at", "ALTER TABLE users ADD COLUMN realname_expires_at DATETIME DEFAULT NULL COMMENT '实名有效期截止时间，NULL 表示永不过期' AFTER realname_at"},
 		{"agents", "real_name", "ALTER TABLE agents ADD COLUMN real_name VARCHAR(60) DEFAULT '' COMMENT '实名姓名'"},
 		{"agents", "real_id_card", "ALTER TABLE agents ADD COLUMN real_id_card VARCHAR(30) DEFAULT '' COMMENT '身份证号'"},
 		{"agents", "realname_at", "ALTER TABLE agents ADD COLUMN realname_at DATETIME DEFAULT NULL COMMENT '实名认证时间'"},
+		{"agents", "realname_expires_at", "ALTER TABLE agents ADD COLUMN realname_expires_at DATETIME DEFAULT NULL COMMENT '实名有效期截止时间，NULL 表示永不过期' AFTER realname_at"},
 	}
 	for _, col := range columns {
 		var count int
@@ -195,6 +259,8 @@ func ensureRealnameStorage(db *sql.DB) error {
 		fail_reason TEXT NOT NULL COMMENT '详细失败原因',
 		serial_no VARCHAR(64) NOT NULL DEFAULT '' COMMENT '服务商流水号',
 		score VARCHAR(20) NOT NULL DEFAULT '' COMMENT '人脸相似度分数',
+		record_type VARCHAR(20) NOT NULL DEFAULT 'init' COMMENT '认证类型(init首次/review复核)',
+		expires_at DATETIME DEFAULT NULL COMMENT '本次认证产生的有效期截止时间，NULL 表示永久',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
 		PRIMARY KEY (id),
 		KEY idx_owner (owner_type, owner_id),
@@ -202,6 +268,26 @@ func ensureRealnameStorage(db *sql.DB) error {
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='实名认证记录表'`)
 	if err != nil {
 		return err
+	}
+
+	// 老库的 realname_records 已在运行时建好，新增列需要单独补齐。
+	for _, col := range []struct{ name, ddl string }{
+		{"record_type", "ALTER TABLE realname_records ADD COLUMN record_type VARCHAR(20) NOT NULL DEFAULT 'init' COMMENT '认证类型(init首次/review复核)' AFTER score"},
+		{"expires_at", "ALTER TABLE realname_records ADD COLUMN expires_at DATETIME DEFAULT NULL COMMENT '本次认证产生的有效期截止时间，NULL 表示永久' AFTER record_type"},
+	} {
+		var count int
+		if err := db.QueryRow(`
+			SELECT COUNT(*) FROM information_schema.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'realname_records' AND COLUMN_NAME = ?
+		`, col.name).Scan(&count); err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+		if _, err := db.Exec(col.ddl); err != nil {
+			return err
+		}
 	}
 
 	var failReasonLength sql.NullInt64
@@ -220,10 +306,150 @@ func ensureRealnameStorage(db *sql.DB) error {
 }
 
 // writeRealnameRecord 写入一条实名认证记录（姓名/身份证明文留档）。
+// 用于失败/中间状态留档；认证通过请走 markRealnameVerified，以便同时记录有效期。
+// 认证类型按主体当前实名状态判定：已实名者的再次失败记为 review，与通过路径口径一致。
 func writeRealnameRecord(db *sql.DB, ownerType string, ownerID int64, provider, realName, idCard, status, failReason, serialNo, score string) {
-	_, _ = db.Exec(`INSERT INTO realname_records (owner_type, owner_id, provider, real_name, id_card, status, fail_reason, serial_no, score)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ownerType, ownerID, provider, realName, idCard, status, failReason, serialNo, score)
+	var previousAt sql.NullTime
+	_ = db.QueryRow("SELECT realname_at FROM "+realnameOwnerTable(ownerType)+" WHERE id = ?", ownerID).Scan(&previousAt)
+	writeRealnameRecordFull(db, ownerType, ownerID, provider, realName, idCard, status, failReason, serialNo, score, realnameRecordTypeFor(previousAt), time.Time{})
+}
+
+// writeRealnameRecordFull 带认证类型与有效期的完整写入。
+func writeRealnameRecordFull(db *sql.DB, ownerType string, ownerID int64, provider, realName, idCard, status, failReason, serialNo, score, recordType string, expiresAt time.Time) {
+	if !validRealnameRecordType(recordType) {
+		recordType = realnameRecordTypeInit
+	}
+	var expires interface{}
+	if !expiresAt.IsZero() {
+		expires = expiresAt
+	}
+	_, _ = db.Exec(`INSERT INTO realname_records (owner_type, owner_id, provider, real_name, id_card, status, fail_reason, serial_no, score, record_type, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ownerType, ownerID, provider, realName, idCard, status, failReason, serialNo, score, recordType, expires)
+}
+
+func validRealnameRecordType(value string) bool {
+	return value == realnameRecordTypeInit || value == realnameRecordTypeReview
+}
+
+func validRealnameScope(value string) bool {
+	return value == realnameScopeByApp || value == realnameScopeAll
+}
+
+func validRealnameLegacyPolicy(value string) bool {
+	return value == realnameLegacyKeep || value == realnameLegacyBackfill
+}
+
+// realnameExpiresAt 按有效期天数计算到期时间；validityDays <= 0 返回零值表示永久有效。
+func realnameExpiresAt(now time.Time, validityDays int) time.Time {
+	if validityDays <= 0 {
+		return time.Time{}
+	}
+	return now.AddDate(0, 0, validityDays)
+}
+
+// realnameStillValid 判断实名是否仍在有效期内（含到期后的宽限期）。
+// 从未认证返回 false；未设置到期时间为永久有效；设置了到期时间则比较宽限后的截止点。
+func realnameStillValid(realnameAt, expiresAt sql.NullTime, graceDays int) bool {
+	if !realnameAt.Valid {
+		return false
+	}
+	if !expiresAt.Valid {
+		return true
+	}
+	deadline := expiresAt.Time
+	if graceDays > 0 {
+		deadline = deadline.AddDate(0, 0, graceDays)
+	}
+	return time.Now().Before(deadline)
+}
+
+// realnameGraceExpired 判断实名是否已过期且超出宽限期（即需要拦截）。
+// 与 realnameStillValid 互补：后者为 false 且曾实名过，才可能是宽限期内或彻底过期。
+func realnameGraceExpired(realnameAt, expiresAt sql.NullTime, graceDays int) bool {
+	if !realnameAt.Valid || !expiresAt.Valid {
+		return false
+	}
+	return !realnameStillValid(realnameAt, expiresAt, graceDays)
+}
+
+// realnameRecordTypeFor 判断本次认证是首次认证还是复核。
+func realnameRecordTypeFor(realnameAt sql.NullTime) string {
+	if realnameAt.Valid {
+		return realnameRecordTypeReview
+	}
+	return realnameRecordTypeInit
+}
+
+// markRealnameVerified 实名通过后的唯一写入入口：更新主体表实名字段与有效期，
+// 并写入一条认证记录。所有服务商（支付宝/快瞳/靓仔/小沐）的通过分支都必须调用它，
+// 避免有效期计算与留档逻辑散落多份。
+func markRealnameVerified(db *sql.DB, ownerType string, ownerID int64, provider, realName, idCard string, cfg realnameConfig, serialNo, score string) error {
+	table := realnameOwnerTable(ownerType)
+
+	// 先读旧状态，用于判定首次/复核，并保留原认证时间用于存量补算。
+	var previousAt sql.NullTime
+	_ = db.QueryRow("SELECT realname_at FROM "+table+" WHERE id = ?", ownerID).Scan(&previousAt)
+
+	now := time.Now()
+	expiresAt := realnameExpiresAt(now, cfg.ValidityDays)
+	var expiresValue interface{}
+	if !expiresAt.IsZero() {
+		expiresValue = expiresAt
+	}
+
+	if _, err := db.Exec(
+		"UPDATE "+table+" SET real_name = ?, real_id_card = ?, realname_at = ?, realname_expires_at = ? WHERE id = ?",
+		realName, idCard, now, expiresValue, ownerID,
+	); err != nil {
+		return err
+	}
+
+	writeRealnameRecordFull(db, ownerType, ownerID, provider, realName, idCard,
+		realnameFaceStatusPassed, "", serialNo, score, realnameRecordTypeFor(previousAt), expiresAt)
+	return nil
+}
+
+// realnameCheckResult 描述某个主体的实名校验结果，供授权校验与购买门槛复用。
+type realnameCheckResult struct {
+	Required bool
+	Verified bool
+	// Status 取值：ok 有效；grace 已过有效期但仍在宽限期（放行但需提示复核）；
+	// never 从未实名；expired 已过期且超出宽限期。
+	Status string
+}
+
+// checkRealnameForOwner 判断指定主体（user/agent）在给定配置下的实名状态。
+// 管理员等未知归属返回无需实名，与历史行为保持一致。
+func checkRealnameForOwner(db *sql.DB, cfg realnameConfig, ownerType string, ownerID int64) realnameCheckResult {
+	table := ""
+	switch ownerType {
+	case "user":
+		table = "users"
+	case "agent":
+		table = "agents"
+	default:
+		return realnameCheckResult{Required: false, Verified: true, Status: realnameStatusOK}
+	}
+
+	var realnameAt, expiresAt sql.NullTime
+	if err := db.QueryRow(
+		"SELECT realname_at, realname_expires_at FROM "+table+" WHERE id = ?", ownerID,
+	).Scan(&realnameAt, &expiresAt); err != nil {
+		return realnameCheckResult{Required: true, Verified: false, Status: realnameStatusNever}
+	}
+
+	if realnameStillValid(realnameAt, expiresAt, cfg.GraceDays) {
+		// 已过有效期但仍在宽限期：放行，但前端应提示尽快重新认证。
+		if realnameGraceExpired(realnameAt, expiresAt, 0) {
+			return realnameCheckResult{Required: true, Verified: true, Status: realnameStatusGrace}
+		}
+		return realnameCheckResult{Required: true, Verified: true, Status: realnameStatusOK}
+	}
+	if realnameAt.Valid {
+		return realnameCheckResult{Required: true, Verified: false, Status: realnameStatusExpired}
+	}
+	return realnameCheckResult{Required: true, Verified: false, Status: realnameStatusNever}
 }
 
 func validKuaitongAuthType(value string) bool {
@@ -233,10 +459,17 @@ func validKuaitongAuthType(value string) bool {
 func loadRealnameConfig(db *sql.DB) (realnameConfig, error) {
 	cfg := realnameConfig{
 		Provider: realnameProviderAlipay, Gateway: alipayDefaultGateway,
+		AlipayAuthMode:   alipayAuthModeFace,
 		KuaitongAuthType: kuaitongAuthTypeFace,
 		TencentBaseURL:   tencentRealnameBaseURL, TencentProductCode: tencentRealnameProduct, TencentUsePackage: true,
 		XiaomuBaseURL: xiaomuRealnameBaseURL, XiaomuProductMode: xiaomuModeThreeElement,
-		RequireAppIDs: map[int64]bool{},
+		RequireAppIDs:       map[int64]bool{},
+		Scope:               realnameScopeByApp,
+		ValidityDays:        0,
+		GraceDays:           defaultRealnameGraceDays,
+		RemindDays:          defaultRealnameRemindDays,
+		AllowIdentityChange: true,
+		LegacyPolicy:        realnameLegacyKeep,
 	}
 	rows, err := db.Query("SELECT `key`, value FROM system_configs WHERE `group` = ?", realnameGroup)
 	if err != nil {
@@ -265,6 +498,10 @@ func loadRealnameConfig(db *sql.DB) (realnameConfig, error) {
 		case "gateway":
 			if v := strings.TrimSpace(value); v != "" {
 				cfg.Gateway = v
+			}
+		case "alipay_auth_mode":
+			if v := strings.TrimSpace(value); v == alipayAuthModeFace || v == alipayAuthModeInfo {
+				cfg.AlipayAuthMode = v
 			}
 		case "kuaitong_access_key":
 			cfg.KuaitongAccessKey = strings.TrimSpace(value)
@@ -309,6 +546,32 @@ func loadRealnameConfig(db *sql.DB) (realnameConfig, error) {
 				if id, err := strconv.ParseInt(part, 10, 64); err == nil && id > 0 {
 					cfg.RequireAppIDs[id] = true
 				}
+			}
+		case "scope":
+			if v := strings.TrimSpace(value); validRealnameScope(v) {
+				cfg.Scope = v
+			}
+		case "purchase_required":
+			cfg.PurchaseRequired = value == "1"
+		case "purchase_check_owner":
+			cfg.PurchaseCheckOwner = value == "1"
+		case "validity_days":
+			if v, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && v >= 0 {
+				cfg.ValidityDays = v
+			}
+		case "grace_days":
+			if v, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && v >= 0 {
+				cfg.GraceDays = v
+			}
+		case "remind_days":
+			if v, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && v >= 0 {
+				cfg.RemindDays = v
+			}
+		case "allow_identity_change":
+			cfg.AllowIdentityChange = value == "1"
+		case "legacy_policy":
+			if v := strings.TrimSpace(value); validRealnameLegacyPolicy(v) {
+				cfg.LegacyPolicy = v
 			}
 		}
 	}
@@ -393,6 +656,7 @@ func AdminRealnameConfig(c *gin.Context) {
 		PrivateKeySet:      cfg.PrivateKey != "",
 		AlipayPublicKey:    cfg.AlipayPublicKey,
 		Gateway:            cfg.Gateway,
+		AlipayAuthMode:     cfg.AlipayAuthMode,
 		KuaitongAccessKey:  cfg.KuaitongAccessKey,
 		KuaitongSecretSet:  cfg.KuaitongSecret != "",
 		KuaitongAuthType:   cfg.KuaitongAuthType,
@@ -406,6 +670,14 @@ func AdminRealnameConfig(c *gin.Context) {
 		XiaomuBaseURL:      cfg.XiaomuBaseURL,
 		XiaomuProductMode:  cfg.XiaomuProductMode,
 		RequireAppIDs:      ids,
+		Scope:              cfg.Scope,
+		PurchaseRequired:   cfg.PurchaseRequired,
+		PurchaseCheckOwner: cfg.PurchaseCheckOwner,
+		ValidityDays:       cfg.ValidityDays,
+		GraceDays:          cfg.GraceDays,
+		RemindDays:         cfg.RemindDays,
+		AllowIdentityChange: cfg.AllowIdentityChange,
+		LegacyPolicy:       cfg.LegacyPolicy,
 		Apps:               apps,
 	}})
 }
@@ -422,6 +694,7 @@ func AdminRealnameConfigUpdate(c *gin.Context) {
 	req.PrivateKey = strings.TrimSpace(req.PrivateKey)
 	req.AlipayPublicKey = strings.TrimSpace(req.AlipayPublicKey)
 	req.Gateway = strings.TrimSpace(req.Gateway)
+	req.AlipayAuthMode = strings.TrimSpace(req.AlipayAuthMode)
 	req.KuaitongAccessKey = strings.TrimSpace(req.KuaitongAccessKey)
 	req.KuaitongSecret = strings.TrimSpace(req.KuaitongSecret)
 	req.KuaitongAuthType = strings.TrimSpace(req.KuaitongAuthType)
@@ -467,6 +740,13 @@ func AdminRealnameConfigUpdate(c *gin.Context) {
 		return
 	}
 	req.Provider = oldCfg.Provider
+	if req.AlipayAuthMode == "" {
+		req.AlipayAuthMode = oldCfg.AlipayAuthMode
+	}
+	if req.AlipayAuthMode != alipayAuthModeFace && req.AlipayAuthMode != alipayAuthModeInfo {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "支付宝实名认证模式不正确"})
+		return
+	}
 	if req.KuaitongAuthType == "" {
 		req.KuaitongAuthType = oldCfg.KuaitongAuthType
 	}
@@ -485,6 +765,75 @@ func AdminRealnameConfigUpdate(c *gin.Context) {
 	}
 	if !validXiaomuProductMode(req.XiaomuProductMode) {
 		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "小沐聚合实名认证产品不正确"})
+		return
+	}
+
+	// 生效范围、购买门槛、有效期与存量策略：未提交时保留旧值，保证老的保存请求不会清空配置。
+	scope := strings.TrimSpace(req.Scope)
+	if scope == "" {
+		scope = oldCfg.Scope
+	}
+	if !validRealnameScope(scope) {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "实名生效范围不正确"})
+		return
+	}
+	purchaseRequired := oldCfg.PurchaseRequired
+	if req.PurchaseRequired != nil {
+		purchaseRequired = *req.PurchaseRequired
+	}
+	purchaseCheckOwner := oldCfg.PurchaseCheckOwner
+	if req.PurchaseCheckOwner != nil {
+		purchaseCheckOwner = *req.PurchaseCheckOwner
+	}
+	validityDays := oldCfg.ValidityDays
+	if req.ValidityDays != nil {
+		validityDays = *req.ValidityDays
+	}
+	graceDays := oldCfg.GraceDays
+	if req.GraceDays != nil {
+		graceDays = *req.GraceDays
+	}
+	remindDays := oldCfg.RemindDays
+	if req.RemindDays != nil {
+		remindDays = *req.RemindDays
+	}
+	allowIdentityChange := oldCfg.AllowIdentityChange
+	if req.AllowIdentityChange != nil {
+		allowIdentityChange = *req.AllowIdentityChange
+	}
+	legacyPolicy := strings.TrimSpace(req.LegacyPolicy)
+	if legacyPolicy == "" {
+		legacyPolicy = oldCfg.LegacyPolicy
+	}
+	if !validRealnameLegacyPolicy(legacyPolicy) {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "存量实名数据处理策略不正确"})
+		return
+	}
+	if validityDays < 0 || validityDays > 36500 {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "实名有效期应为 0-36500 天，0 表示永不过期"})
+		return
+	}
+	if graceDays < 0 || graceDays > 3650 {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "宽限期应为 0-3650 天"})
+		return
+	}
+	if remindDays < 0 || remindDays > 3650 {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "提醒提前天数应为 0-3650 天"})
+		return
+	}
+	// 提醒在"进入到期前 remind_days 的窗口"时触发，提醒天数大于有效期时窗口永远不可能命中。
+	if remindDays > 0 && validityDays > 0 && remindDays > validityDays {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "提醒提前天数不能大于实名有效期，否则提醒永远不会触发"})
+		return
+	}
+	// 购买门槛依赖实名功能本身可用，否则用户无法完成认证会形成死锁。
+	if purchaseRequired && !req.Enabled {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "启用购买前实名前，请先开启实名认证"})
+		return
+	}
+	// 存量补算依赖有效期设置，否则无有效期可补。
+	if legacyPolicy == realnameLegacyBackfill && validityDays <= 0 {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "启用存量补算前，请先设置大于 0 的实名有效期"})
 		return
 	}
 
@@ -597,6 +946,7 @@ func AdminRealnameConfigUpdate(c *gin.Context) {
 		{"private_key", privateKey, "支付宝应用私钥(RSA2)"},
 		{"alipay_public_key", req.AlipayPublicKey, "支付宝公钥"},
 		{"gateway", req.Gateway, "支付宝网关地址"},
+		{"alipay_auth_mode", req.AlipayAuthMode, "支付宝实名认证模式(face刷脸/info信息比对)"},
 		{"kuaitong_access_key", req.KuaitongAccessKey, "快瞳 accessKey"},
 		{"kuaitong_secret", kuaitongSecret, "快瞳 accessSecret"},
 		{"kuaitong_auth_type", req.KuaitongAuthType, "快瞳认证类型(face/two_element)"},
@@ -610,6 +960,14 @@ func AdminRealnameConfigUpdate(c *gin.Context) {
 		{"xiaomu_base_url", req.XiaomuBaseURL, "小沐聚合实名开放 API Base URL"},
 		{"xiaomu_product_mode", req.XiaomuProductMode, "小沐聚合实名认证产品(three_element/face_h5/tencent_h5)"},
 		{"require_app_ids", strings.Join(idStrs, ","), "强制实名认证的应用ID列表"},
+		{"scope", scope, "实名生效范围(by_app按应用/all全部应用)"},
+		{"purchase_required", boolConfigValue(purchaseRequired), "购买前是否要求实名"},
+		{"purchase_check_owner", boolConfigValue(purchaseCheckOwner), "代理为名下用户开通时是否同时校验目标用户实名"},
+		{"validity_days", strconv.Itoa(validityDays), "实名有效期天数，0 表示永不过期"},
+		{"grace_days", strconv.Itoa(graceDays), "实名到期后的宽限天数"},
+		{"remind_days", strconv.Itoa(remindDays), "实名到期前提醒天数，0 表示不提醒"},
+		{"allow_identity_change", boolConfigValue(allowIdentityChange), "复核时是否允许更换姓名/证件"},
+		{"legacy_policy", legacyPolicy, "存量实名数据处理策略(keep永不过期/backfill按认证时间补算)"},
 	}
 	for _, item := range items {
 		if _, err := db.Exec(`
@@ -622,7 +980,24 @@ func AdminRealnameConfigUpdate(c *gin.Context) {
 		}
 	}
 
-	writeSystemConfig(c, http.StatusOK, gin.H{"code": 200, "msg": "实名认证配置已保存", "data": realnameConfigResponse{
+	// 存量补算只在管理员显式选择时执行，且仅在从 keep 切入 backfill 或有效期变化的首次生效时回填。
+	backfilled, backfillErr := applyRealnameLegacyBackfill(db, oldCfg, legacyPolicy, validityDays)
+	msg := "实名认证配置已保存"
+	if backfillErr != nil {
+		msg = "配置已保存，但存量实名有效期补算失败：" + backfillErr.Error()
+	} else if backfilled > 0 {
+		msg = fmt.Sprintf("实名认证配置已保存，已为 %d 个存量实名主体补算有效期", backfilled)
+	}
+
+	// 有效期改回 0（永不过期）时清除已写入的到期时间，否则存量主体会继续按旧有效期过期被拦。
+	cleared, clearErr := clearRealnameExpiryOnPermanent(db, oldCfg, validityDays)
+	if clearErr != nil {
+		msg += "；但清除存量实名有效期失败：" + clearErr.Error()
+	} else if cleared > 0 {
+		msg += fmt.Sprintf("；已为 %d 个主体恢复永久有效", cleared)
+	}
+
+	writeSystemConfig(c, http.StatusOK, gin.H{"code": 200, "msg": msg, "data": realnameConfigResponse{
 		Enabled:            req.Enabled,
 		PluginEnabled:      oldCfg.PluginEnabled,
 		Provider:           req.Provider,
@@ -630,6 +1005,7 @@ func AdminRealnameConfigUpdate(c *gin.Context) {
 		PrivateKeySet:      privateKey != "",
 		AlipayPublicKey:    req.AlipayPublicKey,
 		Gateway:            req.Gateway,
+		AlipayAuthMode:     req.AlipayAuthMode,
 		KuaitongAccessKey:  req.KuaitongAccessKey,
 		KuaitongSecretSet:  kuaitongSecret != "",
 		KuaitongAuthType:   req.KuaitongAuthType,
@@ -643,7 +1019,221 @@ func AdminRealnameConfigUpdate(c *gin.Context) {
 		XiaomuBaseURL:      req.XiaomuBaseURL,
 		XiaomuProductMode:  req.XiaomuProductMode,
 		RequireAppIDs:      ids,
+		Scope:              scope,
+		PurchaseRequired:   purchaseRequired,
+		PurchaseCheckOwner: purchaseCheckOwner,
+		ValidityDays:       validityDays,
+		GraceDays:          graceDays,
+		RemindDays:         remindDays,
+		AllowIdentityChange: allowIdentityChange,
+		LegacyPolicy:       legacyPolicy,
 	}})
+}
+
+// AdminRealnameImpactPreview 计算切换到「全部应用强制实名」的影响面。
+// 数据来源为 verify_logs 中已记录的实名拦截记录，前端在开关旁展示预估影响，
+// 避免管理员在不知情的情况下一次性拦住大量线上应用。
+func AdminRealnameImpactPreview(c *gin.Context) {
+	db, err := openSystemConfigDB()
+	if err != nil {
+		writeSystemConfig(c, http.StatusOK, gin.H{"code": 500, "msg": "数据库连接失败"})
+		return
+	}
+	if err := ensureRealnameStorage(db); err != nil {
+		writeSystemConfig(c, http.StatusOK, gin.H{"code": 500, "msg": "初始化实名存储失败"})
+		return
+	}
+
+	days := 30
+	if raw := strings.TrimSpace(c.Query("days")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 1 && parsed <= 365 {
+			days = parsed
+		}
+	}
+
+	// 宽限期内的主体实际仍放行，统计"会被拦截"的口径必须把它排除，
+	// 与 checkRealnameForOwner 的拦截判定（到期 + 宽限期后才拦）保持一致。
+	graceDays := 0
+	if cfg, err := loadRealnameConfig(db); err == nil {
+		graceDays = cfg.GraceDays
+	}
+
+	result := gin.H{
+		"windowDays": days,
+		// 未实名主体数量：从未认证 + 已过期且超出宽限期（宽限期内仍放行，不计入）。
+		"unverifiedUsers":  0,
+		"unverifiedAgents": 0,
+		// 受影响授权：这些主体的在有效期内的授权数量。
+		"affectedLicenses": 0,
+		// 近期已被拦截的请求数，用于校准预估。
+		"blockedRequests": 0,
+		"blockedLicenses": 0,
+	}
+
+	var unverifiedUsers int
+	_ = db.QueryRow(`
+		SELECT COUNT(*) FROM users
+		WHERE COALESCE(real_name, '') = '' OR realname_at IS NULL
+		   OR (realname_expires_at IS NOT NULL AND DATE_ADD(realname_expires_at, INTERVAL ? DAY) <= NOW())
+	`, graceDays).Scan(&unverifiedUsers)
+	result["unverifiedUsers"] = unverifiedUsers
+
+	var agentCount int
+	_ = db.QueryRow(`
+		SELECT COUNT(*) FROM agents
+		WHERE COALESCE(real_name, '') = '' OR realname_at IS NULL
+		   OR (realname_expires_at IS NOT NULL AND DATE_ADD(realname_expires_at, INTERVAL ? DAY) <= NOW())
+	`, graceDays).Scan(&agentCount)
+	result["unverifiedAgents"] = agentCount
+
+	// 未实名主体名下仍在有效期的授权数：这些是切换全局范围后会被拦截的安装。
+	var affectedLicenses int
+	_ = db.QueryRow(`
+		SELECT COUNT(*) FROM licenses l
+		LEFT JOIN users u ON l.owner_type = 'user' AND u.id = l.owner_id
+		LEFT JOIN agents a ON l.owner_type = 'agent' AND a.id = l.owner_id
+		WHERE l.status = 'active'
+		  AND (l.expired_at IS NULL OR l.expired_at > NOW())
+		  AND (
+			(l.owner_type = 'user' AND (u.realname_at IS NULL OR (u.realname_expires_at IS NOT NULL AND DATE_ADD(u.realname_expires_at, INTERVAL ? DAY) <= NOW())))
+			OR (l.owner_type = 'agent' AND (a.realname_at IS NULL OR (a.realname_expires_at IS NOT NULL AND DATE_ADD(a.realname_expires_at, INTERVAL ? DAY) <= NOW())))
+		  )
+	`, graceDays, graceDays).Scan(&affectedLicenses)
+	result["affectedLicenses"] = affectedLicenses
+
+	// 近期被实名门槛拦截的请求，用于评估当前策略的实际影响。
+	var blockedRequests, blockedLicenses int
+	_ = db.QueryRow(`
+		SELECT COUNT(*), COUNT(DISTINCT license_id)
+		FROM verify_logs
+		WHERE fail_reason IN (?, ?)
+		  AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+	`, verifyReasonRealnameRequired, verifyReasonRealnameExpired, days).Scan(&blockedRequests, &blockedLicenses)
+	result["blockedRequests"] = blockedRequests
+	result["blockedLicenses"] = blockedLicenses
+
+	writeSystemConfig(c, http.StatusOK, gin.H{"code": 200, "msg": "", "data": result})
+}
+
+// AdminRealnameLegacyReset 批量重置指定主体范围的实名有效期，用于管理员显式开启存量复核。
+// scope=all 按当前有效期重算全体存量；scope=unbackfilled 仅处理还没有有效期的存量实名；
+// scope=clear 清空全部主体的到期时间，恢复永久有效（用于撤销补算）。
+func AdminRealnameLegacyReset(c *gin.Context) {
+	db, err := openSystemConfigDB()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "数据库连接失败"})
+		return
+	}
+	if err := ensureRealnameStorage(db); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "初始化实名存储失败"})
+		return
+	}
+
+	scope := strings.TrimSpace(c.Query("scope"))
+	if scope == "" {
+		scope = "unbackfilled"
+	}
+	if scope != "all" && scope != "unbackfilled" && scope != "clear" {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "重置范围不支持"})
+		return
+	}
+
+	// 撤销补算不依赖有效期配置，单独处理。
+	if scope == "clear" {
+		affected, err := clearAllRealnameExpiry(db)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "撤销存量实名有效期失败"})
+			return
+		}
+		msg := fmt.Sprintf("已恢复 %d 个实名主体为永久有效", affected)
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": msg, "data": gin.H{"affected": affected, "scope": scope}})
+		return
+	}
+
+	cfg, err := loadRealnameConfig(db)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "读取实名认证配置失败"})
+		return
+	}
+	if cfg.ValidityDays <= 0 {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "请先设置大于 0 的实名有效期，再进行存量重置"})
+		return
+	}
+
+	where := "realname_at IS NOT NULL AND COALESCE(real_name, '') != ''"
+	if scope == "unbackfilled" {
+		where += " AND realname_expires_at IS NULL"
+	}
+
+	var affected int64
+	for _, table := range []string{"users", "agents"} {
+		result, err := db.Exec(`
+			UPDATE `+table+`
+			SET realname_expires_at = DATE_ADD(realname_at, INTERVAL ? DAY)
+			WHERE `+where,
+			cfg.ValidityDays)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "重置存量实名有效期失败"})
+			return
+		}
+		rows, _ := result.RowsAffected()
+		affected += rows
+	}
+
+	msg := fmt.Sprintf("已重置 %d 个存量实名主体的有效期", affected)
+	c.JSON(http.StatusOK, gin.H{"code": 200, "msg": msg, "data": gin.H{"affected": affected, "scope": scope}})
+}
+
+// clearAllRealnameExpiry 清空 users/agents 上所有实名到期时间。
+func clearAllRealnameExpiry(db *sql.DB) (int64, error) {
+	var affected int64
+	for _, table := range []string{"users", "agents"} {
+		result, err := db.Exec("UPDATE " + table + " SET realname_expires_at = NULL WHERE realname_expires_at IS NOT NULL")
+		if err != nil {
+			return affected, err
+		}
+		rows, _ := result.RowsAffected()
+		affected += rows
+	}
+	return affected, nil
+}
+
+// clearRealnameExpiryOnPermanent 有效期从有限天数改回 0（永久）时，清除全量主体的实名到期时间，
+// 否则存量主体会继续按旧有效期过期被拦，与"0 表示永不过期"的配置语义冲突。
+func clearRealnameExpiryOnPermanent(db *sql.DB, oldCfg realnameConfig, validityDays int) (int64, error) {
+	if validityDays > 0 || oldCfg.ValidityDays <= 0 {
+		return 0, nil
+	}
+	return clearAllRealnameExpiry(db)
+}
+
+// applyRealnameLegacyBackfill 按存量实名的认证时间补算有效期。
+// keep（默认）不做任何改动，存量保持永不过期；backfill 只在本次保存真正启用时执行一次，
+// 避免每次保存配置都全表重写。
+func applyRealnameLegacyBackfill(db *sql.DB, oldCfg realnameConfig, policy string, validityDays int) (int64, error) {
+	if policy != realnameLegacyBackfill || validityDays <= 0 {
+		return 0, nil
+	}
+	if oldCfg.LegacyPolicy == realnameLegacyBackfill && oldCfg.ValidityDays == validityDays {
+		return 0, nil
+	}
+
+	var affected int64
+	for _, table := range []string{"users", "agents"} {
+		result, err := db.Exec(`
+			UPDATE `+table+`
+			SET realname_expires_at = DATE_ADD(realname_at, INTERVAL ? DAY)
+			WHERE realname_at IS NOT NULL
+			  AND realname_expires_at IS NULL
+			  AND COALESCE(real_name, '') != ''
+		`, validityDays)
+		if err != nil {
+			return affected, err
+		}
+		rows, _ := result.RowsAffected()
+		affected += rows
+	}
+	return affected, nil
 }
 
 // ========== 用户端 / 代理端实名 ==========
@@ -668,6 +1258,33 @@ func realnameOwnerTable(ownerType string) string {
 		return "agents"
 	}
 	return "users"
+}
+
+// realnameProviderConfigured 判断当前服务商的必填配置是否完整，返回提示文案。
+// 与各发起分支内的配置校验保持一致，用于在进入限频等前置逻辑前快速失败。
+func realnameProviderConfigured(cfg realnameConfig) (bool, string) {
+	switch cfg.Provider {
+	case realnameProviderXiaomu:
+		if cfg.XiaomuAppKey == "" || cfg.XiaomuAppSecret == "" {
+			return false, "管理员尚未完成小沐聚合实名配置"
+		}
+		if !validXiaomuProductMode(cfg.XiaomuProductMode) {
+			return false, "管理员尚未选择小沐聚合实名认证产品"
+		}
+	case realnameProviderTencent:
+		if cfg.TencentAPIKey == "" || cfg.TencentAPISecret == "" {
+			return false, "管理员尚未完成靓仔聚合认证配置"
+		}
+	case realnameProviderKuaitong:
+		if cfg.KuaitongAccessKey == "" || cfg.KuaitongSecret == "" {
+			return false, "管理员尚未完成快瞳实名认证配置"
+		}
+	default: // 支付宝
+		if cfg.AppID == "" || cfg.PrivateKey == "" {
+			return false, "管理员尚未完成支付宝实名认证配置"
+		}
+	}
+	return true, ""
 }
 
 func requireRealnameOwner(c *gin.Context, expectedRole string) (uint, bool) {
@@ -780,14 +1397,36 @@ func realnameInit(c *gin.Context, ownerType string, ownerID uint) {
 		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "实名认证服务商未启用，请联系管理员"})
 		return
 	}
-
-	// 已实名直接返回
-	var existingName string
-	var existingAt sql.NullTime
-	_ = db.QueryRow("SELECT real_name, realname_at FROM "+realnameOwnerTable(ownerType)+" WHERE id = ?", ownerID).Scan(&existingName, &existingAt)
-	if existingName != "" && existingAt.Valid {
-		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "您已完成实名认证，无需重复认证"})
+	// 服务商配置不完整时快速失败，避免后续限频等前置逻辑被白白消耗。
+	if configured, configMsg := realnameProviderConfigured(rnCfg); !configured {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": configMsg})
 		return
+	}
+
+	// 已实名处理：
+	//   - 仍在有效期内且禁用换证时，仅允许本人以相同姓名与证件复核，避免绕过；
+	//   - 已过期（含宽限期内）一律允许重新发起；
+	//   - 允许换证时提交新证件即可覆盖，历史记录在 realname_records 留档。
+	var existingName, existingIDCard string
+	var existingAt, existingExpiresAt sql.NullTime
+	_ = db.QueryRow(
+		"SELECT real_name, real_id_card, realname_at, realname_expires_at FROM "+realnameOwnerTable(ownerType)+" WHERE id = ?",
+		ownerID,
+	).Scan(&existingName, &existingIDCard, &existingAt, &existingExpiresAt)
+
+	if existingAt.Valid {
+		if !rnCfg.AllowIdentityChange && strings.TrimSpace(existingIDCard) != "" &&
+			existingIDCard != "已认证" &&
+			(!strings.EqualFold(existingIDCard, req.IDCard) ||
+				!strings.EqualFold(strings.TrimSpace(existingName), req.RealName)) {
+			c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "当前配置不允许更换实名证件，请使用已认证的姓名与身份证号"})
+			return
+		}
+		// 仅在实名仍完全有效（未过有效期）时限频；宽限期内和已过期都应允许立即重新认证。
+		if realnameStillValid(existingAt, existingExpiresAt, 0) && !realnameReverifyAllowed(ownerType, ownerID) {
+			c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "您已完成实名认证，如需重新认证请稍后再试"})
+			return
+		}
 	}
 
 	// 小沐聚合实名：三要素同步核验，人脸 / 微信模式跳转上游 H5 后轮询。
@@ -887,6 +1526,12 @@ func realnameInit(c *gin.Context, ownerType string, ownerID uint) {
 	}
 	outerOrderNo := fmt.Sprintf("RN%s%d%d", ownerPrefix, ownerID, time.Now().Unix())
 
+	// 信息比对模式：preconsult 录入信息，用户扫码/唤起支付宝授权后回调完成比对。
+	if rnCfg.AlipayAuthMode == alipayAuthModeInfo {
+		startAlipayInfoRealname(c, db, rnCfg, ownerType, ownerID, outerOrderNo, req)
+		return
+	}
+
 	initResp, err := alipayRealnameInitialize(rnCfg, outerOrderNo, req.RealName, req.IDCard)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "初始化实名认证失败：" + err.Error()})
@@ -968,6 +1613,11 @@ func realnameQuery(c *gin.Context, ownerType string, ownerID uint) {
 		xiaomuRealnameQuery(c, db, rnCfg, ownerType, ownerID)
 		return
 	}
+	// 信息比对模式：认证单走 faceToken 轮询，结果由支付宝授权回调写入
+	if rnCfg.Provider == realnameProviderAlipay && rnCfg.AlipayAuthMode == alipayAuthModeInfo && strings.TrimSpace(c.Query("faceToken")) != "" {
+		alipayInfoQuery(c, db, ownerType, ownerID)
+		return
+	}
 	if rnCfg.Provider == realnameProviderKuaitong || rnCfg.Provider == realnameProviderTencent {
 		realnameFaceQuery(c, db, rnCfg, ownerType, ownerID)
 		return
@@ -1008,8 +1658,10 @@ func realnameQuery(c *gin.Context, ownerType string, ownerID uint) {
 		realName = "已认证"
 		idCard = "已认证"
 	}
-	_, _ = db.Exec("UPDATE "+realnameOwnerTable(ownerType)+" SET real_name = ?, real_id_card = ?, realname_at = NOW() WHERE id = ?", realName, idCard, ownerID)
-	writeRealnameRecord(db, ownerType, int64(ownerID), realnameProviderAlipay, realName, idCard, realnameFaceStatusPassed, "", certifyID, "")
+	if err := markRealnameVerified(db, ownerType, int64(ownerID), realnameProviderAlipay, realName, idCard, rnCfg, certifyID, ""); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "保存实名认证结果失败，请稍后重试"})
+		return
+	}
 
 	if outerOrderNo != "" {
 		_, _ = db.Exec("DELETE FROM system_configs WHERE `group` = ? AND `key` = ?", realnameGroup, "pending_"+outerOrderNo)
@@ -1034,14 +1686,10 @@ func completeKuaitongTwoElement(c *gin.Context, db *sql.DB, cfg realnameConfig, 
 		return
 	}
 
-	if _, err := db.Exec(
-		"UPDATE "+realnameOwnerTable(ownerType)+" SET real_name = ?, real_id_card = ?, realname_at = NOW() WHERE id = ?",
-		req.RealName, req.IDCard, ownerID,
-	); err != nil {
+	if err := markRealnameVerified(db, ownerType, int64(ownerID), realnameProviderKuaitong, req.RealName, req.IDCard, cfg, serialNo, ""); err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "保存实名认证结果失败"})
 		return
 	}
-	writeRealnameRecord(db, ownerType, int64(ownerID), realnameProviderKuaitong, req.RealName, req.IDCard, realnameFaceStatusPassed, "", serialNo, "")
 	c.JSON(http.StatusOK, gin.H{
 		"code": 200,
 		"msg":  "实名认证成功",
@@ -2254,7 +2902,13 @@ type realnameRecordItem struct {
 	FailReason string `json:"failReason"`
 	SerialNo   string `json:"serialNo"`
 	Score      string `json:"score"`
-	CreatedAt  string `json:"createdAt"`
+	RecordType string `json:"recordType"` // init 首次 / review 复核
+	ExpiresAt  string `json:"expiresAt"`  // 本次认证产生的有效期
+	// Validity 为主体当前实名状态：unverified 未实名 / permanent 永久有效 /
+	// valid 有效 / expiring 30 天内到期 / expired 已过期。
+	Validity       string `json:"validity"`
+	OwnerExpiresAt string `json:"ownerExpiresAt"`
+	CreatedAt      string `json:"createdAt"`
 }
 
 // AdminRealnameRecordList 实名认证记录列表（姓名/身份证展示时脱敏，库中明文存储）。
@@ -2283,13 +2937,13 @@ func AdminRealnameRecordList(c *gin.Context) {
 			SELECT 'user' AS owner_type, id AS owner_id,
 				COALESCE(nickname, '') AS owner_name, COALESCE(email, '') AS owner_email,
 				COALESCE(real_name, '') AS real_name, COALESCE(real_id_card, '') AS real_id_card,
-				realname_at
+				realname_at, realname_expires_at
 			FROM users
 			UNION ALL
 			SELECT 'agent' AS owner_type, id AS owner_id,
 				COALESCE(name, '') AS owner_name, COALESCE(email, '') AS owner_email,
 				COALESCE(real_name, '') AS real_name, COALESCE(real_id_card, '') AS real_id_card,
-				realname_at
+				realname_at, realname_expires_at
 			FROM agents
 		) o ON o.owner_type = r.owner_type AND o.owner_id = r.owner_id`
 	where := ` WHERE r.status IN ('passed', 'failed')
@@ -2311,13 +2965,26 @@ func AdminRealnameRecordList(c *gin.Context) {
 		like := "%" + kw + "%"
 		args = append(args, like, like, like, like, like, like)
 	}
-	if provider := strings.TrimSpace(c.Query("provider")); provider == realnameProviderAlipay || provider == realnameProviderKuaitong || provider == realnameProviderTencent {
+	if provider := strings.TrimSpace(c.Query("provider")); provider == realnameProviderAlipay || provider == realnameProviderKuaitong || provider == realnameProviderTencent || provider == realnameProviderXiaomu {
 		where += " AND r.provider = ?"
 		args = append(args, provider)
 	}
 	if status := strings.TrimSpace(c.Query("status")); status == realnameFaceStatusPassed || status == realnameFaceStatusFailed {
 		where += " AND r.status = ?"
 		args = append(args, status)
+	}
+	if recordType := strings.TrimSpace(c.Query("recordType")); validRealnameRecordType(recordType) {
+		where += " AND r.record_type = ?"
+		args = append(args, recordType)
+	}
+	// 有效期筛选：expired 已过期（不含宽限期内）；expiring 在提醒窗口内即将过期。
+	switch strings.TrimSpace(c.Query("validity")) {
+	case "expired":
+		where += " AND o.realname_expires_at IS NOT NULL AND o.realname_expires_at <= NOW()"
+	case "expiring":
+		where += " AND o.realname_expires_at IS NOT NULL AND o.realname_expires_at > NOW() AND o.realname_expires_at <= DATE_ADD(NOW(), INTERVAL 30 DAY)"
+	case "permanent":
+		where += " AND o.realname_expires_at IS NULL AND o.realname_at IS NOT NULL"
 	}
 
 	var total int
@@ -2329,8 +2996,9 @@ func AdminRealnameRecordList(c *gin.Context) {
 	query := `SELECT r.id, r.owner_type, r.owner_id, r.provider,
 		CASE WHEN r.status = 'passed' THEN o.real_name ELSE r.real_name END,
 		CASE WHEN r.status = 'passed' THEN o.real_id_card ELSE r.id_card END,
-		r.status, r.fail_reason, r.serial_no, r.score, r.created_at,
-		COALESCE(o.owner_name, ''), COALESCE(o.owner_email, '')` +
+		r.status, r.fail_reason, r.serial_no, r.score, r.record_type, r.expires_at, r.created_at,
+		COALESCE(o.owner_name, ''), COALESCE(o.owner_email, ''),
+		o.realname_at, o.realname_expires_at` +
 		ownerSource + where + ` ORDER BY r.id DESC LIMIT ? OFFSET ?`
 	args = append(args, pageSize, (page-1)*pageSize)
 
@@ -2344,13 +3012,34 @@ func AdminRealnameRecordList(c *gin.Context) {
 	list := make([]realnameRecordItem, 0)
 	for rows.Next() {
 		var item realnameRecordItem
-		var createdAt sql.NullTime
+		var createdAt, recordExpiresAt, ownerExpiresAt sql.NullTime
+		var ownerRealnameAt sql.NullTime
 		if err := rows.Scan(&item.ID, &item.OwnerType, &item.OwnerID, &item.Provider, &item.RealName, &item.IDCard,
-			&item.Status, &item.FailReason, &item.SerialNo, &item.Score, &createdAt, &item.OwnerName, &item.OwnerEmail); err != nil {
+			&item.Status, &item.FailReason, &item.SerialNo, &item.Score, &item.RecordType, &recordExpiresAt, &createdAt,
+			&item.OwnerName, &item.OwnerEmail, &ownerRealnameAt, &ownerExpiresAt); err != nil {
 			continue
 		}
 		if createdAt.Valid {
 			item.CreatedAt = createdAt.Time.Format("2006-01-02 15:04:05")
+		}
+		if recordExpiresAt.Valid {
+			item.ExpiresAt = recordExpiresAt.Time.Format("2006-01-02 15:04:05")
+		}
+		// 主体当前实名状态：已过期 / 即将过期 / 有效 / 未实名。
+		switch {
+		case !ownerRealnameAt.Valid:
+			item.Validity = "unverified"
+		case !ownerExpiresAt.Valid:
+			item.Validity = "permanent"
+		case !ownerExpiresAt.Time.After(time.Now()):
+			item.Validity = "expired"
+		case ownerExpiresAt.Time.Before(time.Now().AddDate(0, 0, 30)):
+			item.Validity = "expiring"
+		default:
+			item.Validity = "valid"
+		}
+		if ownerExpiresAt.Valid {
+			item.OwnerExpiresAt = ownerExpiresAt.Time.Format("2006-01-02 15:04:05")
 		}
 		item.RealName = maskRealName(item.RealName)
 		item.IDCard = maskIDCard(item.IDCard)
@@ -2367,38 +3056,136 @@ func AdminRealnameRecordList(c *gin.Context) {
 
 // ========== 授权校验用：判断用户是否需要实名 ==========
 
-// userRealnameRequired 返回（该应用是否要求实名，授权归属主体是否已实名）。
+// userRealnameRequired 返回（该应用是否要求实名，授权归属主体是否已实名，实名状态）。
 // 用户与代理商都按各自主体表校验；未知归属类型才按管理员直接创建处理。
-func userRealnameRequired(db *sql.DB, appID int64, licenseID int64) (required bool, verified bool, err error) {
+// 配置读取失败时放行（fail-open）并写一条告警日志，避免数据库抖动导致线上授权全部失败。
+func userRealnameRequired(db *sql.DB, appID int64, licenseID int64) (required bool, verified bool, status string, err error) {
 	rnCfg, err := loadRealnameConfig(db)
 	if err != nil {
-		return false, true, nil // 配置读取失败时放行，避免误杀
+		fmt.Printf("[实名认证] 读取配置失败，本次授权校验放行：%v\n", err)
+		return false, true, realnameStatusOK, nil
 	}
-	if !rnCfg.Enabled || !rnCfg.RequireAppIDs[appID] {
-		return false, true, nil
+	if !rnCfg.Enabled || !realnameAppInScope(rnCfg, appID) {
+		return false, true, realnameStatusOK, nil
 	}
 
 	var ownerType string
 	var ownerID int64
 	if err := db.QueryRow("SELECT owner_type, owner_id FROM licenses WHERE id = ?", licenseID).Scan(&ownerType, &ownerID); err != nil {
-		return true, false, err
+		return true, false, realnameStatusNever, err
 	}
-	table := ""
-	switch ownerType {
-	case "user":
-		table = "users"
-	case "agent":
-		table = "agents"
-	default:
-		// 管理员直接创建的授权不受实名限制
-		return true, true, nil
+	// 管理员直接创建的授权不受实名限制
+	if ownerType != "user" && ownerType != "agent" {
+		return true, true, realnameStatusOK, nil
 	}
 
-	var realnameAt sql.NullTime
-	if err := db.QueryRow("SELECT realname_at FROM "+table+" WHERE id = ?", ownerID).Scan(&realnameAt); err != nil {
-		return true, false, err
+	result := checkRealnameForOwner(db, rnCfg, ownerType, ownerID)
+	return result.Required, result.Verified, result.Status, nil
+}
+
+// realnameAppInScope 判断应用是否落在实名生效范围内：
+// all 对所有应用（含今后新增）生效；by_app 只对管理员勾选的应用生效。
+func realnameAppInScope(cfg realnameConfig, appID int64) bool {
+	if cfg.Scope == realnameScopeAll {
+		return true
 	}
-	return true, realnameAt.Valid, nil
+	return cfg.RequireAppIDs[appID]
+}
+
+// realnameBlockedReason 把实名状态映射为授权校验的拒绝原因，未拦截时返回空串。
+func realnameBlockedReason(status string) string {
+	switch status {
+	case realnameStatusNever:
+		return verifyReasonRealnameRequired
+	case realnameStatusExpired:
+		return verifyReasonRealnameExpired
+	}
+	return ""
+}
+
+// realnamePendingNotice 宽限期内虽放行，但需要提示用户尽快重新认证。
+func realnamePendingNotice(status string) string {
+	if status == realnameStatusGrace {
+		return "实名信息已过期，当前处于宽限期，请尽快重新认证"
+	}
+	return ""
+}
+
+// ========== 购买前实名门槛 ==========
+
+// 购买拦截原因，供前端区分"从未实名"与"实名过期"。
+const (
+	purchaseReasonRealnameRequired = "realname_required_purchase"
+	purchaseReasonRealnameExpired  = "realname_expired_purchase"
+)
+
+// realnameCheckForPurchase 校验购买/开通前的实名门槛。
+// 返回 (reason, message)：reason 为空表示放行。
+//   - 开关未开启、实名功能未启用或插件未启用时一律放行，避免管理员未配置服务商时用户无法购买；
+//   - payer 为实际付款方（user/agent），始终校验；
+//   - owner 为目标授权归属，配置 purchase_check_owner 时在 owner 与 payer 不同主体时一并校验。
+func realnameCheckForPurchase(db *sql.DB, payerType string, payerID int64, ownerType string, ownerID int64) (string, string) {
+	rnCfg, err := loadRealnameConfig(db)
+	if err != nil {
+		fmt.Printf("[实名认证] 读取配置失败，本次购买校验放行：%v\n", err)
+		return "", ""
+	}
+	if !rnCfg.Enabled || !rnCfg.PluginEnabled || !rnCfg.PurchaseRequired {
+		return "", ""
+	}
+
+	type realnameSubject struct {
+		ownerType string
+		ownerID   int64
+		isOwner   bool
+	}
+	targets := make([]realnameSubject, 0, 2)
+	if payerID > 0 && (payerType == "user" || payerType == "agent") {
+		targets = append(targets, realnameSubject{payerType, payerID, false})
+	}
+	if rnCfg.PurchaseCheckOwner && ownerID > 0 && (ownerType == "user" || ownerType == "agent") &&
+		(ownerType != payerType || ownerID != payerID) {
+		targets = append(targets, realnameSubject{ownerType, ownerID, true})
+	}
+	if len(targets) == 0 {
+		return "", ""
+	}
+
+	for _, target := range targets {
+		check := checkRealnameForOwner(db, rnCfg, target.ownerType, target.ownerID)
+		switch check.Status {
+		case realnameStatusNever:
+			if target.isOwner {
+				return purchaseReasonRealnameRequired, "该用户尚未完成实名认证，请先让用户完成实名后再为其开通"
+			}
+			return purchaseReasonRealnameRequired, "购买前需完成实名认证，请先在个人中心完成实名"
+		case realnameStatusExpired:
+			if target.isOwner {
+				return purchaseReasonRealnameExpired, "该用户的实名信息已过期，请先让用户重新认证后再为其开通"
+			}
+			return purchaseReasonRealnameExpired, "实名信息已过期，请先重新认证后再购买"
+		}
+	}
+	return "", ""
+}
+
+// realnamePurchaseCheckResponse 统一输出购买前的实名拦截响应，保证各购买入口文案一致。
+func realnamePurchaseCheckResponse(c *gin.Context, reason, message string) {
+	c.JSON(http.StatusOK, gin.H{
+		"code": 403,
+		"msg":  message,
+		"data": gin.H{"result": "fail", "reason": reason},
+	})
+}
+
+// realnamePurchaseBlocked 在任何扣款/建单之前调用：返回 true 表示已写入响应并应终止处理。
+func realnamePurchaseBlocked(c *gin.Context, db *sql.DB, payerType string, payerID int64, ownerType string, ownerID int64) bool {
+	reason, message := realnameCheckForPurchase(db, payerType, payerID, ownerType, ownerID)
+	if reason == "" {
+		return false
+	}
+	realnamePurchaseCheckResponse(c, reason, message)
+	return true
 }
 
 // ========== 支付宝网关调用 ==========
@@ -2478,20 +3265,31 @@ func alipayRealnameQuery(cfg realnameConfig, certifyID, outerOrderNo string) (*a
 
 // alipayPost 以 RSA2 签名调用支付宝网关，返回整个响应 JSON。
 func alipayPost(cfg realnameConfig, method, bizContent string) (map[string]interface{}, error) {
+	return alipayPostParams(cfg, method, bizContent, nil)
+}
+
+// alipayPostParams 在 alipayPost 基础上支持顶层公共参数：
+// oauth.token 的 grant_type/code、consult 的 auth_token 等不属于 biz_content。
+func alipayPostParams(cfg realnameConfig, method, bizContent string, extraParams map[string]string) (map[string]interface{}, error) {
 	privateKey, err := parseAlipayPrivateKey(cfg.PrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("应用私钥解析失败：%w", err)
 	}
 
 	params := map[string]string{
-		"app_id":      cfg.AppID,
-		"method":      method,
-		"format":      "JSON",
-		"charset":     "utf-8",
-		"sign_type":   "RSA2",
-		"timestamp":   time.Now().Format("2006-01-02 15:04:05"),
-		"version":     "1.0",
-		"biz_content": bizContent,
+		"app_id":    cfg.AppID,
+		"method":    method,
+		"format":    "JSON",
+		"charset":   "utf-8",
+		"sign_type": "RSA2",
+		"timestamp": time.Now().Format("2006-01-02 15:04:05"),
+		"version":   "1.0",
+	}
+	if bizContent != "" {
+		params["biz_content"] = bizContent
+	}
+	for k, v := range extraParams {
+		params[k] = v
 	}
 
 	keys := make([]string, 0, len(params))
@@ -2537,6 +3335,132 @@ func alipayPost(cfg realnameConfig, method, bizContent string) (map[string]inter
 		return nil, fmt.Errorf("支付宝响应解析失败")
 	}
 	return result, nil
+}
+
+// ========== 支付宝实名信息验证（preconsult + 用户授权 + consult） ==========
+
+type alipayPreconsultResponse struct {
+	VerifyID string `json:"verify_id"`
+}
+
+type alipayConsultResponse struct {
+	Passed     string `json:"passed"` // T 一致 / F 不一致
+	FailReason string `json:"fail_reason"`
+	FailParams string `json:"fail_params"`
+}
+
+// alipayPreconsultBizContent 按官方文档组装预咨询接口的业务参数：
+// 平铺的 user_name/cert_type/cert_no，可选 mobile/logon_id 暂未使用。
+// 文档：https://opendocs.alipay.com/open/02qq4q
+func alipayPreconsultBizContent(realName, idCard string) string {
+	bizContent, _ := json.Marshal(map[string]string{
+		"user_name": realName,
+		"cert_type": "IDENTITY_CARD",
+		"cert_no":   idCard,
+	})
+	return string(bizContent)
+}
+
+// alipayPreconsult 录入用户实名信息，返回 verify_id（有效期 2 小时）。
+func alipayPreconsult(cfg realnameConfig, realName, idCard string) (*alipayPreconsultResponse, error) {
+	resp, err := alipayPost(cfg, alipayPreconsultMethod, alipayPreconsultBizContent(realName, idCard))
+	if err != nil {
+		return nil, err
+	}
+	node, ok := resp["alipay_user_certdoc_certverify_preconsult_response"].(map[string]interface{})
+	if !ok {
+		return nil, errors.New("响应格式异常")
+	}
+	if code, _ := node["code"].(string); code != "10000" {
+		subMsg, _ := node["sub_msg"].(string)
+		if subMsg == "" {
+			subMsg, _ = node["msg"].(string)
+		}
+		return nil, fmt.Errorf("支付宝返回错误：%s", subMsg)
+	}
+	verifyID, _ := node["verify_id"].(string)
+	if verifyID == "" {
+		return nil, errors.New("支付宝未返回 verify_id")
+	}
+	return &alipayPreconsultResponse{VerifyID: verifyID}, nil
+}
+
+// alipayOauthToken 用授权码 auth_code 换取用户授权令牌。
+func alipayOauthToken(cfg realnameConfig, authCode string) (string, error) {
+	if strings.TrimSpace(authCode) == "" {
+		return "", errors.New("缺少授权码 auth_code")
+	}
+	resp, err := alipayPostParams(cfg, alipayOauthMethod, "", map[string]string{
+		"grant_type": "authorization_code",
+		"code":       authCode,
+	})
+	if err != nil {
+		return "", err
+	}
+	node, ok := resp["alipay_system_oauth_token_response"].(map[string]interface{})
+	if !ok {
+		// oauth 接口失败时错误节点为 alipay_error_response
+		if errNode, ok := resp["error_response"].(map[string]interface{}); ok {
+			subMsg, _ := errNode["sub_msg"].(string)
+			if subMsg == "" {
+				subMsg, _ = errNode["msg"].(string)
+			}
+			return "", fmt.Errorf("换取授权令牌失败：%s", subMsg)
+		}
+		return "", errors.New("换取授权令牌响应格式异常")
+	}
+	token, _ := node["access_token"].(string)
+	if token == "" {
+		subMsg, _ := node["sub_msg"].(string)
+		if subMsg == "" {
+			subMsg, _ = node["msg"].(string)
+		}
+		return "", fmt.Errorf("换取授权令牌失败：%s", subMsg)
+	}
+	return token, nil
+}
+
+// alipayConsult 对比预录入信息与用户支付宝实名信息，返回校验结果。
+func alipayConsult(cfg realnameConfig, verifyID, accessToken string) (*alipayConsultResponse, error) {
+	bizContent, _ := json.Marshal(map[string]string{"verify_id": verifyID})
+	resp, err := alipayPostParams(cfg, alipayConsultMethod, string(bizContent), map[string]string{
+		"auth_token": accessToken,
+	})
+	if err != nil {
+		return nil, err
+	}
+	node, ok := resp["alipay_user_certdoc_certverify_consult_response"].(map[string]interface{})
+	if !ok {
+		return nil, errors.New("响应格式异常")
+	}
+	if code, _ := node["code"].(string); code != "10000" {
+		subMsg, _ := node["sub_msg"].(string)
+		if subMsg == "" {
+			subMsg, _ = node["msg"].(string)
+		}
+		return nil, fmt.Errorf("支付宝返回错误：%s", subMsg)
+	}
+	raw, _ := json.Marshal(node)
+	var out alipayConsultResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// alipayInfoAuthorizeURL 构造实名信息验证的用户授权链接。
+// PC 端该页面自带登录二维码，移动端包 alipays scheme 唤起支付宝后端内打开。
+func alipayInfoAuthorizeURL(cfg realnameConfig, verifyID, callbackURL string) string {
+	base := alipayAuthorizeURL
+	if cfg.Gateway == alipaySandboxGateway {
+		base = alipaySandboxAuthorizeURL
+	}
+	values := url.Values{}
+	values.Set("app_id", cfg.AppID)
+	values.Set("scope", "id_verify")
+	values.Set("redirect_uri", callbackURL)
+	values.Set("cert_verify_id", verifyID)
+	return base + "?" + values.Encode()
 }
 
 func parseAlipayPrivateKey(raw string) (*rsa.PrivateKey, error) {
@@ -2617,6 +3541,201 @@ func maskIDCard(id string) string {
 	return id[:4] + strings.Repeat("*", len(id)-8) + id[len(id)-4:]
 }
 
+// ========== 支付宝信息比对认证单（provider=alipay, auth_mode=info） ==========
+
+const (
+	alipayInfoVerifyIndexPrefix = "rn_verify_"   // system_configs 键前缀：verify_id -> 认证单 token
+	alipayInfoSessionTTL        = 30 * time.Minute
+)
+
+// startAlipayInfoRealname 信息比对模式发起认证：preconsult 录入 + 生成授权链接。
+// 认证单复用 kt_face_<token> 存储；rn_verify_<verify_id> 作为回调反查索引。
+func startAlipayInfoRealname(c *gin.Context, db *sql.DB, cfg realnameConfig, ownerType string, ownerID uint, outerOrderNo string, req userRealnameInitRequest) {
+	preResp, err := alipayPreconsult(cfg, req.RealName, req.IDCard)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "录入实名信息失败：" + err.Error()})
+		return
+	}
+
+	token, err := newRealnameFaceToken()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "创建认证单失败"})
+		return
+	}
+	callbackURL := buildRequestURL(c, alipayCallbackPath)
+	session := realnameFaceSession{
+		Provider:  realnameProviderAlipay,
+		AuthMode:  alipayAuthModeInfo,
+		OwnerType: ownerType,
+		UserID:    int64(ownerID),
+		RealName:  req.RealName,
+		IDCard:    req.IDCard,
+		Status:    realnameFaceStatusPending,
+		OrderNo:   outerOrderNo,
+		VerifyID:  preResp.VerifyID,
+		ExpireAt:  time.Now().Add(alipayInfoSessionTTL),
+	}
+	if _, err := db.Exec(`
+		INSERT INTO system_configs (`+"`group`"+`, `+"`key`"+`, value, description)
+		VALUES (?, ?, ?, '支付宝信息比对认证单')
+		ON DUPLICATE KEY UPDATE value = VALUES(value)
+	`, realnameGroup, "kt_face_"+token, session.encode()); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "创建认证单失败"})
+		return
+	}
+	if _, err := db.Exec(`
+		INSERT INTO system_configs (`+"`group`"+`, `+"`key`"+`, value, description)
+		VALUES (?, ?, ?, '支付宝信息比对回调索引')
+		ON DUPLICATE KEY UPDATE value = VALUES(value)
+	`, realnameGroup, alipayInfoVerifyIndexPrefix+preResp.VerifyID, token); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "创建认证单失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"msg":  "请使用支付宝扫码或唤起支付宝完成授权",
+		"data": gin.H{
+			"status":     realnameFaceStatusPending,
+			"provider":   realnameProviderAlipay,
+			"authMode":   alipayAuthModeInfo,
+			"faceToken":  token,
+			"certifyUrl": alipayInfoAuthorizeURL(cfg, preResp.VerifyID, callbackURL),
+		},
+	})
+}
+
+// AlipayRealnameCallback 支付宝授权回调（公开接口）：
+// 授权成功携带 auth_code，拒绝授权时缺失。凭 auth_code 换令牌后完成信息比对。
+func AlipayRealnameCallback(c *gin.Context) {
+	verifyID := strings.TrimSpace(c.Query("cert_verify_id"))
+	authCode := strings.TrimSpace(c.Query("auth_code"))
+	html := func(body string) {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(body))
+	}
+	if verifyID == "" {
+		html(realnameFaceErrorHTML("回调参数缺失，请返回重新发起认证"))
+		return
+	}
+	// 同一 verify_id 的并发回调串行处理，避免重复调用 consult 与重复留档。
+	unlock := lockAlipayInfoCallback(verifyID)
+	defer unlock()
+
+	db, err := config.DB()
+	if err != nil {
+		html(realnameFaceErrorHTML("数据库连接失败"))
+		return
+	}
+	if err := ensureSystemConfigStorage(db); err != nil {
+		html(realnameFaceErrorHTML("初始化配置失败"))
+		return
+	}
+	if err := ensureRealnameStorage(db); err != nil {
+		html(realnameFaceErrorHTML("初始化实名存储失败"))
+		return
+	}
+
+	var token string
+	if err := db.QueryRow(
+		"SELECT value FROM system_configs WHERE `group` = ? AND `key` = ?",
+		realnameGroup, alipayInfoVerifyIndexPrefix+verifyID,
+	).Scan(&token); err != nil {
+		html(realnameFaceErrorHTML("认证单不存在或已完成，请重新发起认证"))
+		return
+	}
+	session, err := loadRealnameFaceSession(db, token)
+	if err != nil {
+		html(realnameFaceErrorHTML(err.Error()))
+		return
+	}
+	if session.Provider != realnameProviderAlipay || session.VerifyID != verifyID {
+		html(realnameFaceErrorHTML("认证单号不匹配，请重新发起认证"))
+		return
+	}
+
+	// 用户拒绝授权或授权中断：会话保持 pending，允许重新扫码/唤起。
+	if authCode == "" {
+		html(realnameFaceResultHTML("✕", "授权未完成", "您取消了实名信息授权，请返回重新发起认证", false))
+		return
+	}
+
+	cfg, err := loadRealnameConfig(db)
+	if err != nil || !cfg.Enabled || cfg.Provider != realnameProviderAlipay {
+		html(realnameFaceErrorHTML("实名认证服务不可用，请联系管理员"))
+		return
+	}
+
+	accessToken, err := alipayOauthToken(cfg, authCode)
+	if err != nil {
+		html(realnameFaceErrorHTML("支付宝授权失败：" + htmlEscapeString(err.Error())))
+		return
+	}
+	consultResp, err := alipayConsult(cfg, verifyID, accessToken)
+	if err != nil {
+		html(realnameFaceErrorHTML("实名信息比对失败：" + htmlEscapeString(err.Error())))
+		return
+	}
+
+	if _, err := db.Exec("DELETE FROM system_configs WHERE `group` = ? AND `key` = ?",
+		realnameGroup, alipayInfoVerifyIndexPrefix+verifyID); err != nil {
+		// 索引删除失败时保留会话 pending，用户重新授权后仍可回收结果
+		html(realnameFaceErrorHTML("认证结果保存失败，请稍后重新发起"))
+		return
+	}
+
+	if consultResp.Passed != "T" {
+		reason := strings.TrimSpace(consultResp.FailReason)
+		if reason == "" {
+			reason = "支付宝实名信息与提交信息不一致"
+		}
+		session.Status = realnameFaceStatusFailed
+		session.FailMsg = reason
+		saveRealnameFaceSession(db, token, session)
+		writeRealnameRecord(db, session.OwnerType, session.UserID, realnameProviderAlipay,
+			session.RealName, session.IDCard, realnameFaceStatusFailed, reason, session.VerifyID, "")
+		html(realnameFaceResultHTML("✕", "认证未通过", htmlEscapeString(reason)+"，请返回重新发起认证", false))
+		return
+	}
+
+	session.Status = realnameFaceStatusPassed
+	session.FailMsg = ""
+	saveRealnameFaceSession(db, token, session)
+	if err := markRealnameVerified(db, session.OwnerType, session.UserID, realnameProviderAlipay,
+		session.RealName, session.IDCard, cfg, session.VerifyID, ""); err != nil {
+		session.Status = realnameFaceStatusPending
+		saveRealnameFaceSession(db, token, session)
+		html(realnameFaceErrorHTML("认证结果保存失败，请返回重新发起认证"))
+		return
+	}
+	html(realnameFaceResultHTML("✓", "实名认证成功", "请返回网站继续操作", true))
+}
+
+// alipayInfoQuery 信息比对模式轮询：结果由回调写入，这里只回放本地会话状态。
+func alipayInfoQuery(c *gin.Context, db *sql.DB, ownerType string, ownerID uint) {
+	token := strings.TrimSpace(c.Query("faceToken"))
+	if token == "" {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "缺少 faceToken"})
+		return
+	}
+	session, err := loadRealnameFaceSession(db, token)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": err.Error()})
+		return
+	}
+	if session.OwnerType != ownerType || session.UserID != int64(ownerID) {
+		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "认证单号不匹配"})
+		return
+	}
+	switch session.Status {
+	case realnameFaceStatusPassed:
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "实名认证成功", "data": realnameFacePassedData(session)})
+	case realnameFaceStatusFailed, realnameFaceStatusUnknown:
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "认证未通过", "data": realnameFaceFailureData(session)})
+	default:
+		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "认证未完成", "data": gin.H{"status": realnameFaceStatusPending}})
+	}
+}
+
 // ========== 快瞳 / 靓仔聚合认证扫码拍照认证单 ==========
 
 // 认证单存储在 system_configs（group=realname, key=kt_face_<token>），value 格式：
@@ -2636,6 +3755,52 @@ const (
 )
 
 var realnameFaceAttempts sync.Map // token -> 已尝试次数（进程级，防止单认证单被无限重试）
+
+var alipayInfoCallbackLocks sync.Map // verify_id -> *sync.Mutex，同一授权回调串行处理
+
+// lockAlipayInfoCallback 按 verify_id 加进程级互斥锁，返回解锁函数。
+// 解锁后删除映射，避免锁对象随回调量累积；极端竞态下退化为无锁，与加锁前行为一致。
+func lockAlipayInfoCallback(verifyID string) func() {
+	v, _ := alipayInfoCallbackLocks.LoadOrStore(verifyID, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return func() {
+		mu.Unlock()
+		alipayInfoCallbackLocks.Delete(verifyID)
+	}
+}
+
+// 有效期内主动复核的限频：同一主体两次复核之间至少间隔 realnameReverifyInterval，
+// 避免用户反复点击产生上游认证费用。进程级缓存，重启后重置可接受。
+const realnameReverifyInterval = 24 * time.Hour
+
+var (
+	realnameReverifyMu       sync.Mutex
+	realnameReverifyLastSeen = map[string]time.Time{}
+)
+
+// realnameReverifyAllowed 判断该主体是否允许在本轮发起有效期内复核；
+// 返回 true 时同时记录本次时间戳。
+func realnameReverifyAllowed(ownerType string, ownerID uint) bool {
+	key := fmt.Sprintf("%s:%d", ownerType, ownerID)
+	now := time.Now()
+
+	realnameReverifyMu.Lock()
+	defer realnameReverifyMu.Unlock()
+	// 惰性清理：条目超过阈值时淘汰已过期的记录，避免 map 随主体数量无限增长。
+	if len(realnameReverifyLastSeen) > 4096 {
+		for k, last := range realnameReverifyLastSeen {
+			if now.Sub(last) >= realnameReverifyInterval {
+				delete(realnameReverifyLastSeen, k)
+			}
+		}
+	}
+	if last, ok := realnameReverifyLastSeen[key]; ok && now.Sub(last) < realnameReverifyInterval {
+		return false
+	}
+	realnameReverifyLastSeen[key] = now
+	return true
+}
 
 // newRealnameFaceToken 生成不可猜测的认证单 token。
 func newRealnameFaceToken() (string, error) {
@@ -2663,6 +3828,7 @@ type realnameFaceSession struct {
 	OrderNo      string    `json:"orderNo,omitempty"`   // 上游订单号，用于对账与留档
 	RecordID     string    `json:"recordId,omitempty"`  // 上游认证记录 ID，查询结果的 record 参数
 	CertifyID    string    `json:"certifyId,omitempty"` // 靓仔人脸认证会话 ID
+	VerifyID     string    `json:"verifyId,omitempty"`  // 支付宝信息比对 verify_id
 	AuthURL      string    `json:"authUrl,omitempty"`   // 上游 H5 认证地址
 	ExpireAt     time.Time `json:"expireAt"`
 }
@@ -2723,6 +3889,11 @@ func loadRealnameFaceSession(db *sql.DB, token string) (realnameFaceSession, err
 		return realnameFaceSession{}, err
 	}
 	if time.Now().After(session.ExpireAt) {
+		// 顺手清理过期认证单及其回调索引，避免 system_configs 行无限累积。
+		_, _ = db.Exec("DELETE FROM system_configs WHERE `group` = ? AND `key` = ?", realnameGroup, "kt_face_"+token)
+		if session.VerifyID != "" {
+			_, _ = db.Exec("DELETE FROM system_configs WHERE `group` = ? AND `key` = ?", realnameGroup, alipayInfoVerifyIndexPrefix+session.VerifyID)
+		}
 		return realnameFaceSession{}, errors.New("认证单已过期，请重新发起")
 	}
 	return session, nil
@@ -2958,11 +4129,12 @@ func realnameFaceQuery(c *gin.Context, db *sql.DB, cfg realnameConfig, ownerType
 					}
 					writeRealnameRecord(db, session.OwnerType, session.UserID, session.Provider, session.RealName, session.IDCard, realnameFaceStatusFailed, recordReason, session.CertifyID, result.Score)
 				default:
+					if err := markRealnameVerified(db, session.OwnerType, session.UserID, session.Provider, session.RealName, session.IDCard, cfg, session.CertifyID, result.Score); err != nil {
+						c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "保存实名认证结果失败，请稍后重试"})
+						return
+					}
 					session.Status = realnameFaceStatusPassed
 					saveRealnameFaceSession(db, token, session)
-					table := realnameOwnerTable(session.OwnerType)
-					_, _ = db.Exec("UPDATE "+table+" SET real_name = ?, real_id_card = ?, realname_at = NOW() WHERE id = ?", session.RealName, session.IDCard, session.UserID)
-					writeRealnameRecord(db, session.OwnerType, session.UserID, session.Provider, session.RealName, session.IDCard, realnameFaceStatusPassed, "", session.CertifyID, result.Score)
 				}
 			}
 		}
@@ -3207,15 +4379,12 @@ func RealnameFaceSubmit(c *gin.Context) {
 		}
 	}
 
+	if err := markRealnameVerified(db, session.OwnerType, session.UserID, session.Provider, session.RealName, session.IDCard, rnCfg, serialNo, score); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "保存实名认证结果失败，请稍后重试"})
+		return
+	}
 	session.Status = realnameFaceStatusPassed
 	saveRealnameFaceSession(db, req.Token, session)
-	table := "users"
-	if session.OwnerType == "agent" {
-		table = "agents"
-	}
-	_, _ = db.Exec("UPDATE "+table+" SET real_name = ?, real_id_card = ?, realname_at = NOW() WHERE id = ?",
-		session.RealName, session.IDCard, session.UserID)
-	writeRealnameRecord(db, session.OwnerType, session.UserID, session.Provider, session.RealName, session.IDCard, realnameFaceStatusPassed, "", serialNo, score)
 	realnameFaceAttempts.Delete(req.Token)
 	c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "实名认证成功", "data": gin.H{"status": "passed"}})
 }

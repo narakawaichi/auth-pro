@@ -29,6 +29,7 @@ func AgentPanelProfile(c *gin.Context) {
 		contact                       sql.NullString
 		discount, balance             float64
 		createdAt, realnameAt         sql.NullTime
+		realnameExpiresAt             sql.NullTime
 		realName, realIDCard          string
 	)
 	if err := ensureRealnameStorage(db); err != nil {
@@ -38,11 +39,11 @@ func AgentPanelProfile(c *gin.Context) {
 	err := db.QueryRow(`
 		SELECT a.email, a.name, a.level, COALESCE(NULLIF(l.name, ''), a.level),
 		       a.contact, a.discount, a.balance, a.created_at,
-		       COALESCE(a.real_name, ''), COALESCE(a.real_id_card, ''), a.realname_at
+		       COALESCE(a.real_name, ''), COALESCE(a.real_id_card, ''), a.realname_at, a.realname_expires_at
 		FROM agents a
 		LEFT JOIN agent_levels l ON l.code = a.level
 		WHERE a.id = ? AND a.enabled = 1
-	`, agentID).Scan(&email, &name, &level, &levelName, &contact, &discount, &balance, &createdAt, &realName, &realIDCard, &realnameAt)
+	`, agentID).Scan(&email, &name, &level, &levelName, &contact, &discount, &balance, &createdAt, &realName, &realIDCard, &realnameAt, &realnameExpiresAt)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 404, "msg": "代理商不存在或已禁用"})
 		return
@@ -66,14 +67,33 @@ func AgentPanelProfile(c *gin.Context) {
 	if realnameAt.Valid {
 		realnameAtStr = realnameAt.Time.Format("2006-01-02 15:04:05")
 	}
+	realnameExpiresAtStr := ""
+	if realnameExpiresAt.Valid {
+		realnameExpiresAtStr = realnameExpiresAt.Time.Format("2006-01-02 15:04:05")
+	}
 	realnameEnabled := false
 	realnameProvider := ""
 	realnameAuthMode := ""
+	realnameScope := realnameScopeByApp
+	purchaseRealnameRequired := false
+	purchaseCheckOwner := true
+	realnameStatus := realnameStatusOK
+	realnameVerified := realnameAt.Valid
 	if rnCfg, err := loadRealnameConfig(db); err == nil {
 		realnameEnabled = rnCfg.Enabled
 		realnameProvider = rnCfg.Provider
+		realnameScope = rnCfg.Scope
+		purchaseRealnameRequired = rnCfg.Enabled && rnCfg.PluginEnabled && rnCfg.PurchaseRequired
+		purchaseCheckOwner = rnCfg.PurchaseCheckOwner
 		if rnCfg.Provider == realnameProviderXiaomu {
 			realnameAuthMode = rnCfg.XiaomuProductMode
+		} else if rnCfg.Provider == realnameProviderAlipay {
+			realnameAuthMode = rnCfg.AlipayAuthMode
+		}
+		if realnameEnabled {
+			check := checkRealnameForOwner(db, rnCfg, "agent", int64(agentID))
+			realnameStatus = check.Status
+			realnameVerified = check.Verified
 		}
 	}
 
@@ -94,10 +114,16 @@ func AgentPanelProfile(c *gin.Context) {
 			"realnameEnabled":  realnameEnabled,
 			"realnameProvider": realnameProvider,
 			"realnameAuthMode": realnameAuthMode,
-			"realnameVerified": realnameAt.Valid,
+			"realnameScope":    realnameScope,
+			"realnameVerified": realnameVerified,
+			"realnameStatus":   realnameStatus,
+			"realnameNotice":   realnamePendingNotice(realnameStatus),
 			"realName":         maskRealName(realName),
 			"realIdCard":       maskIDCard(realIDCard),
 			"realnameAt":       realnameAtStr,
+			"realnameExpiresAt": realnameExpiresAtStr,
+			"purchaseRealnameRequired": purchaseRealnameRequired,
+			"purchaseCheckOwner":       purchaseCheckOwner,
 		},
 	})
 }

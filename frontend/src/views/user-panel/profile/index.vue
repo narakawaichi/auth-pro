@@ -76,6 +76,15 @@
                   <iconify-icon icon="ri:shield-check-fill" width="18" />
                   <span>已完成实名认证</span>
                 </div>
+                <el-alert
+                  v-if="realnameStatus === 'grace'"
+                  type="warning"
+                  :closable="false"
+                  show-icon
+                  title="实名信息已过期，当前处于宽限期"
+                  description="宽限期内仍可正常使用，请尽快在下方重新认证以恢复完整权限"
+                  class="mb-3"
+                />
                 <div class="realname-info">
                   <div
                     ><label>姓名</label><span>{{ realnameInfo.realName }}</span></div
@@ -86,6 +95,44 @@
                   <div v-if="realnameInfo.realnameAt"
                     ><label>认证时间</label><span>{{ realnameInfo.realnameAt }}</span></div
                   >
+                  <div
+                    ><label>有效期</label
+                    ><span>{{ realnameInfo.realnameExpiresAt || '永久有效' }}</span></div
+                  >
+                </div>
+                <el-divider />
+                <div class="realname-reverify">
+                  <p class="reverify-tip">
+                    如需更换信息或提前复核，可提交后重新认证（会覆盖当前实名信息，历史记录保留）
+                  </p>
+                  <el-form :model="realnameForm" label-width="80px" class="profile-form">
+                    <el-form-item label="真实姓名">
+                      <el-input
+                        v-model="realnameForm.realName"
+                        maxlength="30"
+                        placeholder="请输入与身份证一致的姓名"
+                      />
+                    </el-form-item>
+                    <el-form-item label="身份证号">
+                      <el-input
+                        v-model="realnameForm.idCard"
+                        maxlength="18"
+                        placeholder="请输入 18 位身份证号"
+                      />
+                    </el-form-item>
+                    <el-form-item v-if="needRealnameMobile" label="手机号">
+                      <el-input
+                        v-model="realnameForm.mobile"
+                        maxlength="11"
+                        placeholder="请输入本人实名手机号"
+                      />
+                    </el-form-item>
+                    <el-form-item>
+                      <el-button :loading="realnameSubmitting" @click="handleRealnameSubmit">
+                        {{ realnameSubmitButtonText }}
+                      </el-button>
+                    </el-form-item>
+                  </el-form>
                 </div>
               </div>
 
@@ -99,9 +146,19 @@
                 />
                 <template v-else>
                   <el-alert
+                    v-if="realnameStatus === 'expired'"
+                    type="error"
+                    :closable="false"
+                    show-icon
+                    title="实名信息已过期，授权安装与购买已被拦截"
+                    description="请重新提交姓名与身份证号完成认证"
+                    class="mb-3"
+                  />
+                  <el-alert
+                    v-else
                     type="warning"
                     :closable="false"
-                    title="部分应用要求完成实名认证后才能安装使用"
+                    :title="realnameRequirementText"
                     class="mb-3"
                   />
                   <el-form :model="realnameForm" label-width="80px" class="profile-form">
@@ -190,7 +247,20 @@
         <img v-if="certifyQrDataUrl" :src="certifyQrDataUrl" alt="认证二维码" class="certify-qr" />
         <p class="certify-tip">{{ certifyDialogTip }}</p>
         <el-button
-          v-if="certifyProvider !== 'kuaitong' && certifyProvider !== 'tencent'"
+          v-if="isAlipayInfoCertify && isMobileDevice && !isWeChatBrowser"
+          type="primary"
+          @click="openAlipayAuth"
+          >打开支付宝授权</el-button
+        >
+        <p v-if="isAlipayInfoCertify && isWeChatBrowser" class="certify-tip">
+          微信内无法唤起支付宝，请右上角选择浏览器打开，或使用支付宝扫码
+        </p>
+        <el-button
+          v-if="
+            certifyProvider !== 'kuaitong' &&
+            certifyProvider !== 'tencent' &&
+            !(isAlipayInfoCertify && isMobileDevice)
+          "
           type="primary"
           link
           @click="openCertifyUrl"
@@ -206,8 +276,8 @@
 </template>
 
 <script setup lang="ts">
-  import { reactive, ref, computed, onMounted, onBeforeUnmount } from 'vue'
-  import { useRouter } from 'vue-router'
+  import { reactive, ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+  import { useRoute, useRouter } from 'vue-router'
   import { ElMessage } from 'element-plus'
   import { Loading } from '@element-plus/icons-vue'
   import { Icon as IconifyIcon } from '@iconify/vue'
@@ -215,6 +285,7 @@
   import axios from 'axios'
 
   const router = useRouter()
+  const route = useRoute()
 
   function getToken() {
     return localStorage.getItem('user_panel_token') || ''
@@ -237,10 +308,29 @@
   const realnameEnabled = ref(false)
   const realnameProvider = ref('')
   const realnameAuthMode = ref('')
+  const realnameScope = ref('by_app')
+  const realnameStatus = ref('ok')
+  const purchaseRealnameRequired = ref(false)
   const realnameVerified = ref(false)
-  const realnameInfo = reactive({ realName: '', realIdCard: '', realnameAt: '' })
+  const realnameInfo = reactive({
+    realName: '',
+    realIdCard: '',
+    realnameAt: '',
+    realnameExpiresAt: ''
+  })
   const realnameForm = reactive({ realName: '', idCard: '', mobile: '' })
   const realnameSubmitting = ref(false)
+
+  // 实名入口提示：按生效范围与购买门槛换文案，避免用户在两处看到不同说法。
+  const realnameRequirementText = computed(() => {
+    if (realnameScope.value === 'all') {
+      return '本站已开启全站实名，完成实名后才能安装应用'
+    }
+    if (purchaseRealnameRequired.value) {
+      return '购买授权前需完成实名认证，部分应用安装时也会校验'
+    }
+    return '部分应用要求完成实名认证后才能安装使用'
+  })
 
   const activeTab = ref('profile')
   const certifyDialogVisible = ref(false)
@@ -249,6 +339,7 @@
   const certifyOuterOrderNo = ref('')
   const certifyId = ref('')
   const certifyProvider = ref('')
+  const certifyAuthMode = ref('')
   const faceToken = ref('')
   const certifyPolling = ref(false)
   const certifyStatusText = ref('等待认证...')
@@ -266,10 +357,16 @@
         realnameEnabled.value = !!d.realnameEnabled
         realnameProvider.value = d.realnameProvider || ''
         realnameAuthMode.value = d.realnameAuthMode || ''
+        realnameScope.value = d.realnameScope || 'by_app'
+        realnameStatus.value = d.realnameStatus || 'ok'
+        purchaseRealnameRequired.value = !!d.purchaseRealnameRequired
         realnameVerified.value = !!d.realnameVerified
         realnameInfo.realName = d.realName || ''
         realnameInfo.realIdCard = d.realIdCard || ''
         realnameInfo.realnameAt = d.realnameAt || ''
+        realnameInfo.realnameExpiresAt = d.realnameExpiresAt || ''
+        // 通知外层布局刷新实名到期提示条
+        window.dispatchEvent(new CustomEvent('user-panel-realname-refresh'))
       }
     } catch {
       // 个人信息加载失败时保持空表单，由用户手动刷新
@@ -376,10 +473,22 @@
         return
       }
       certifyProvider.value = data.data?.provider || realnameProvider.value
+      certifyAuthMode.value = data.data?.authMode || ''
       if (data.data?.status === 'passed') {
         ElMessage.success('实名认证成功')
         resetRealnameForm()
         fetchProfile()
+        return
+      }
+      // 支付宝信息比对：授权链接生成二维码，移动端可唤起支付宝，认证单用 faceToken 轮询
+      if (isAlipayInfoCertify.value && data.data?.faceToken) {
+        faceToken.value = data.data.faceToken
+        certifyUrl.value = data.data.certifyUrl || ''
+        certifyQrDataUrl.value = certifyUrl.value
+          ? await QRCode.toDataURL(certifyUrl.value, { width: 220, margin: 1 })
+          : ''
+        certifyDialogVisible.value = true
+        startCertifyPolling()
         return
       }
       // 小沐聚合实名：跳转上游认证页，认证单用 faceToken 轮询
@@ -473,7 +582,26 @@
 
   // 认证单通过 faceToken 轮询的服务商（本站拍照单与聚合认证单）
   function isTokenPollingProvider(provider: string | undefined) {
-    return isFaceRealnameProvider(provider) || provider === 'xiaomu'
+    return (
+      isFaceRealnameProvider(provider) ||
+      provider === 'xiaomu' ||
+      (provider === 'alipay' && certifyAuthMode.value === 'info')
+    )
+  }
+
+  // 支付宝信息比对认证：授权链接 + 唤起支付宝
+  const isAlipayInfoCertify = computed(
+    () => certifyProvider.value === 'alipay' && certifyAuthMode.value === 'info'
+  )
+
+  const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+
+  const isWeChatBrowser = /MicroMessenger/i.test(navigator.userAgent)
+
+  function openAlipayAuth() {
+    if (!certifyUrl.value) return
+    window.location.href =
+      'alipays://platformapi/startapp?appId=20000067&url=' + encodeURIComponent(certifyUrl.value)
   }
 
   const needRealnameMobile = computed(
@@ -494,12 +622,20 @@
     if (certifyProvider.value === 'xiaomu') {
       return '实名认证'
     }
+    if (isAlipayInfoCertify.value) {
+      return '支付宝实名认证'
+    }
     return isFaceRealnameProvider(certifyProvider.value) ? '扫码人脸核验' : '支付宝扫码认证'
   })
 
   const certifyDialogTip = computed(() => {
     if (certifyProvider.value === 'xiaomu') {
       return '请扫码或点击下方链接完成实名认证'
+    }
+    if (isAlipayInfoCertify.value) {
+      return isMobileDevice
+        ? '请点击下方按钮唤起支付宝完成授权，或用另一台设备的支付宝扫码'
+        : '请使用支付宝 App 扫码完成实名信息授权'
     }
     return isFaceRealnameProvider(certifyProvider.value)
       ? '请使用微信或支付宝扫码完成人脸核验'
@@ -516,6 +652,18 @@
     navigator.clipboard.writeText(profileForm.userId)
     ElMessage.success('已复制用户ID')
   }
+
+  // 支持从购买页/仪表盘带 ?tab=realname 直达实名标签；
+  // 已在个人中心时路由参数变化不会重挂载组件，需监听 query 同步切换。
+  watch(
+    () => route.query.tab,
+    (tab) => {
+      if (typeof tab === 'string' && ['profile', 'realname', 'security'].includes(tab)) {
+        activeTab.value = tab
+      }
+    },
+    { immediate: true }
+  )
 
   onMounted(() => {
     fetchProfile()
@@ -664,6 +812,15 @@
         span {
           color: var(--el-text-color-primary);
         }
+      }
+    }
+
+    .realname-reverify {
+      .reverify-tip {
+        margin: 0 0 16px;
+        font-size: 13px;
+        line-height: 1.7;
+        color: var(--el-text-color-secondary);
       }
     }
   }

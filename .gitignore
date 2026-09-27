@@ -36,6 +36,9 @@ release/
 *.swp
 .DS_Store
 
+# AI assistant / local collaboration notes (kept local, not part of upstream PRs)
+/AGENTS.md
+
 # pnpm store cache
 .pnpm-store/
 .cache/

@@ -844,6 +844,10 @@ func redeemLicenseCardHandler(c *gin.Context, ownerType string) {
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "初始化卡密模块失败"})
 		return
 	}
+	// 卡密兑换等同于开通授权，同样受购买前实名门槛约束，避免未实名主体绕过购买路径直接获得授权。
+	if realnamePurchaseBlocked(c, db, ownerType, ownerID, ownerType, ownerID) {
+		return
+	}
 	result, message, err := redeemLicenseCard(db, req.CardCode, ownerType, ownerID)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "兑换失败，请稍后重试"})

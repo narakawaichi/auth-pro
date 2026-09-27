@@ -27,6 +27,8 @@ const (
 	defaultExpireContent   = "您好，{{ownerName}}：\n\n您的应用 {{appName}} 将于 {{expiresAt}} 到期，剩余 {{daysLeft}} 天。\n\n请及时续费，以免影响正常使用。"
 	defaultOpenedSubject   = "{{appName}} 授权开通通知"
 	defaultOpenedContent   = "您好，{{ownerName}}：\n\n管理员已为您开通应用 {{appName}} 的授权。\n\n开通时间：{{openedAt}}\n到期时间：{{expiresAt}}\n授权码：{{licenseKey}}\n\n请妥善保存相关信息。"
+	defaultRealnameExpireSubject = "实名认证即将过期提醒"
+	defaultRealnameExpireContent = "您好，{{ownerName}}：\n\n您的实名认证信息将于 {{expiresAt}} 过期，剩余 {{daysLeft}} 天。\n\n过期后需要重新认证，否则将影响应用授权安装与购买。\n\n请及时前往个人中心完成重新认证。"
 )
 
 var (
@@ -49,6 +51,7 @@ type mailConfig struct {
 	EnabledPurchaseSuccess bool   `json:"enabledPurchaseSuccess"`
 	EnabledExpireReminder  bool   `json:"enabledExpireReminder"`
 	EnabledLicenseOpened   bool   `json:"enabledLicenseOpened"`
+	EnabledRealnameExpire  bool   `json:"enabledRealnameExpire"`
 	ExpireRemindDays       string `json:"expireRemindDays"`
 	PurchaseSubject        string `json:"purchaseSubject"`
 	PurchaseContent        string `json:"purchaseContent"`
@@ -59,6 +62,9 @@ type mailConfig struct {
 	OpenedSubject          string `json:"openedSubject"`
 	OpenedContent          string `json:"openedContent"`
 	OpenedContentType      string `json:"openedContentType"`
+	RealnameExpireSubject     string `json:"realnameExpireSubject"`
+	RealnameExpireContent     string `json:"realnameExpireContent"`
+	RealnameExpireContentType string `json:"realnameExpireContentType"`
 }
 
 type updateMailConfigRequest = mailConfig
@@ -167,6 +173,10 @@ func defaultMailConfig() mailConfig {
 		OpenedSubject:          defaultOpenedSubject,
 		OpenedContent:          defaultOpenedContent,
 		OpenedContentType:      "text",
+		EnabledRealnameExpire:     true,
+		RealnameExpireSubject:     defaultRealnameExpireSubject,
+		RealnameExpireContent:     defaultRealnameExpireContent,
+		RealnameExpireContentType: "text",
 	}
 }
 
@@ -231,6 +241,14 @@ func loadMailConfig(db *sql.DB, includePassword bool) (mailConfig, error) {
 			cfg.OpenedContent = value
 		case "opened_content_type":
 			cfg.OpenedContentType = value
+		case "enabled_realname_expire":
+			cfg.EnabledRealnameExpire = value == "true" || value == "1"
+		case "realname_expire_subject":
+			cfg.RealnameExpireSubject = value
+		case "realname_expire_content":
+			cfg.RealnameExpireContent = value
+		case "realname_expire_content_type":
+			cfg.RealnameExpireContentType = value
 		}
 	}
 	return normalizeMailConfig(cfg), rows.Err()
@@ -347,6 +365,10 @@ func saveMailConfig(db *sql.DB, cfg mailConfig, keepPassword bool) error {
 		{"opened_subject", cfg.OpenedSubject, "后台开通邮件标题"},
 		{"opened_content", cfg.OpenedContent, "后台开通邮件内容"},
 		{"opened_content_type", cfg.OpenedContentType, "后台开通邮件内容类型"},
+		{"enabled_realname_expire", strconv.FormatBool(cfg.EnabledRealnameExpire), "实名到期提醒邮件开关"},
+		{"realname_expire_subject", cfg.RealnameExpireSubject, "实名到期提醒邮件标题"},
+		{"realname_expire_content", cfg.RealnameExpireContent, "实名到期提醒邮件内容"},
+		{"realname_expire_content_type", cfg.RealnameExpireContentType, "实名到期提醒邮件内容类型"},
 	}
 	if !keepPassword {
 		items = append(items, struct {
@@ -383,6 +405,7 @@ func saveMailContentType(db *sql.DB, template, contentType, content string) erro
 		"purchase": {"purchase_content", "purchase_content_type", "购买成功邮件内容", "购买成功邮件内容类型"},
 		"expire":   {"expire_content", "expire_content_type", "到期提醒邮件内容", "到期提醒邮件内容类型"},
 		"opened":   {"opened_content", "opened_content_type", "后台开通邮件内容", "后台开通邮件内容类型"},
+		"realname": {"realname_expire_content", "realname_expire_content_type", "实名到期提醒邮件内容", "实名到期提醒邮件内容类型"},
 	}[template]
 	if !ok {
 		return errInvalidMailTemplate
@@ -795,6 +818,10 @@ func sendBusinessMail(db *sql.DB, cfg mailConfig, eventType string, ctx licenseM
 		subjectTemplate = cfg.OpenedSubject
 		contentTemplate = cfg.OpenedContent
 		contentType = cfg.OpenedContentType
+	} else if eventType == "realname_expire" {
+		subjectTemplate = cfg.RealnameExpireSubject
+		contentTemplate = cfg.RealnameExpireContent
+		contentType = cfg.RealnameExpireContentType
 	}
 	subject := renderMailTemplate(subjectTemplate, vars)
 	content := renderMailTemplate(contentTemplate, vars)
@@ -958,6 +985,16 @@ func createMailLog(db *sql.DB, eventType, targetType string, targetID, licenseID
 	}
 	id, _ := result.LastInsertId()
 	return id, true
+}
+
+// createMailLogWithKey 使用调用方自备的幂等键写入发送日志。
+// 实名提醒这类不挂在授权上的事件需要自己组 key，因此单独暴露一层。
+func createMailLogWithKey(db *sql.DB, eventType, targetType string, targetID int64, recipient, subject, content string, remindDays int, eventKey string) (int64, bool) {
+	var keyPtr *string
+	if strings.TrimSpace(eventKey) != "" {
+		keyPtr = &eventKey
+	}
+	return createMailLog(db, eventType, targetType, targetID, 0, recipient, subject, content, remindDays, keyPtr)
 }
 
 func markMailLogSent(db *sql.DB, id int64) {

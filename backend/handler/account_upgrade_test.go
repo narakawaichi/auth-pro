@@ -224,8 +224,8 @@ func upgradeUserStep(balance string) upgradeDBStep {
 	return upgradeDBStep{
 		op:            "query",
 		queryContains: []string{"FROM users", "FOR UPDATE"},
-		columns:       []string{"id", "email", "phone", "password_hash", "nickname", "balance", "account_status", "enabled", "real_name", "real_id_card", "realname_at"},
-		rows:          [][]driver.Value{{int64(7), "user@example.com", "13800138000", "hash", "测试用户", balance, "active", true, "测试用户", "ID123", nil}},
+		columns:       []string{"id", "email", "phone", "password_hash", "nickname", "balance", "account_status", "enabled", "real_name", "real_id_card", "realname_at", "realname_expires_at"},
+		rows:          [][]driver.Value{{int64(7), "user@example.com", "13800138000", "hash", "测试用户", balance, "active", true, "测试用户", "ID123", nil, nil}},
 	}
 }
 

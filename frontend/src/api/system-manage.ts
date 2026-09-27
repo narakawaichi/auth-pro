@@ -66,6 +66,11 @@ export interface RealnameAppItem {
 export type RealnameProvider = 'alipay' | 'kuaitong' | 'tencent' | 'xiaomu'
 export type KuaitongAuthType = 'face' | 'two_element'
 export type XiaomuProductMode = 'three_element' | 'face_h5' | 'tencent_h5'
+export type AlipayAuthMode = 'face' | 'info'
+/** 实名生效范围：by_app 按应用勾选；all 全部应用强制 */
+export type RealnameScope = 'by_app' | 'all'
+/** 存量实名数据处理策略：keep 保持永不过期；backfill 按认证时间补算 */
+export type RealnameLegacyPolicy = 'keep' | 'backfill'
 
 export interface RealnameConfigData {
   enabled: boolean
@@ -75,6 +80,7 @@ export interface RealnameConfigData {
   privateKeySet: boolean
   alipayPublicKey: string
   gateway: string
+  alipayAuthMode: AlipayAuthMode
   kuaitongAccessKey: string
   kuaitongSecretSet: boolean
   kuaitongAuthType: KuaitongAuthType
@@ -88,6 +94,14 @@ export interface RealnameConfigData {
   xiaomuBaseUrl: string
   xiaomuProductMode: XiaomuProductMode
   requireAppIds: number[]
+  scope: RealnameScope
+  purchaseRequired: boolean
+  purchaseCheckOwner: boolean
+  validityDays: number
+  graceDays: number
+  remindDays: number
+  allowIdentityChange: boolean
+  legacyPolicy: RealnameLegacyPolicy
   apps: RealnameAppItem[]
 }
 
@@ -98,6 +112,7 @@ export interface UpdateRealnameConfigParams {
   privateKey?: string
   alipayPublicKey: string
   gateway: string
+  alipayAuthMode: AlipayAuthMode
   kuaitongAccessKey: string
   kuaitongSecret?: string
   kuaitongAuthType: KuaitongAuthType
@@ -110,6 +125,24 @@ export interface UpdateRealnameConfigParams {
   xiaomuBaseUrl: string
   xiaomuProductMode: XiaomuProductMode
   requireAppIds: number[]
+  scope: RealnameScope
+  purchaseRequired: boolean
+  purchaseCheckOwner: boolean
+  validityDays: number
+  graceDays: number
+  remindDays: number
+  allowIdentityChange: boolean
+  legacyPolicy: RealnameLegacyPolicy
+}
+
+/** 切换全局实名范围前的影响面预估 */
+export interface RealnameImpactData {
+  windowDays: number
+  unverifiedUsers: number
+  unverifiedAgents: number
+  affectedLicenses: number
+  blockedRequests: number
+  blockedLicenses: number
 }
 
 export interface MailConfigData {
@@ -125,6 +158,7 @@ export interface MailConfigData {
   enabledPurchaseSuccess: boolean
   enabledExpireReminder: boolean
   enabledLicenseOpened: boolean
+  enabledRealnameExpire: boolean
   expireRemindDays: string
   purchaseSubject: string
   purchaseContent: string
@@ -135,10 +169,13 @@ export interface MailConfigData {
   openedSubject: string
   openedContent: string
   openedContentType: 'text' | 'html'
+  realnameExpireSubject: string
+  realnameExpireContent: string
+  realnameExpireContentType: 'text' | 'html'
 }
 
 export interface MailContentTypeUpdateData {
-  template: 'purchase' | 'expire' | 'opened'
+  template: 'purchase' | 'expire' | 'opened' | 'realname'
   contentType: 'text' | 'html'
   content: string
 }
@@ -435,6 +472,13 @@ export interface RealnameRecordItem {
   failReason: string
   serialNo: string
   score: string
+  /** init 首次认证 / review 复核 */
+  recordType: 'init' | 'review'
+  /** 本次认证产生的有效期，空表示永久 */
+  expiresAt: string
+  /** 主体当前实名状态 */
+  validity: 'unverified' | 'permanent' | 'valid' | 'expiring' | 'expired'
+  ownerExpiresAt: string
   createdAt: string
 }
 
@@ -452,10 +496,28 @@ export function fetchRealnameRecords(params: {
   keyword?: string
   provider?: string
   status?: 'passed' | 'failed'
+  recordType?: 'init' | 'review'
+  validity?: 'expired' | 'expiring' | 'permanent'
 }) {
   return request.get<RealnameRecordListResult>({
     url: '/api/system/realname-records',
     params
+  })
+}
+
+/** 切换全局实名范围前的影响面预估（可选传统计窗口天数） */
+export function fetchRealnameImpact(days?: number) {
+  return request.get<RealnameImpactData>({
+    url: '/api/system/realname-impact',
+    params: days ? { days } : undefined
+  })
+}
+
+/** 批量重置存量实名有效期：scope=unbackfilled 仅未设有效期的存量，all 全部重算 */
+export function resetRealnameLegacyValidity(scope: 'unbackfilled' | 'all' | 'clear') {
+  return request.post<{ affected: number; scope: string }>({
+    url: '/api/system/realname-legacy-reset',
+    params: { scope }
   })
 }
 

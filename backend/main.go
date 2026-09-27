@@ -69,6 +69,9 @@ func main() {
 		// 快瞳 / 腾讯云增强人脸拍照提交（扫码手机端调用，token 即凭证，无需登录）
 		api.POST("/realname/face/submit", handler.RealnameFaceSubmit)
 
+		// 支付宝信息比对授权回调（scope=id_verify，redirect_uri 指向此接口）
+		api.GET("/realname/alipay-callback", handler.AlipayRealnameCallback)
+
 		// 认证相关（无需鉴权）
 		auth := api.Group("/auth")
 		{
@@ -233,6 +236,8 @@ func main() {
 			superSecured.POST("/system/home-templates/:id/uninstall", handler.AdminHomeTemplateUninstall)
 			superSecured.GET("/system/realname-config", handler.AdminRealnameConfig)
 			superSecured.PUT("/system/realname-config", handler.AdminRealnameConfigUpdate)
+			superSecured.GET("/system/realname-impact", handler.AdminRealnameImpactPreview)
+			superSecured.POST("/system/realname-legacy-reset", handler.AdminRealnameLegacyReset)
 			superSecured.POST("/system/realname-products", handler.AdminRealnameProducts)
 			superSecured.GET("/system/realname-records", handler.AdminRealnameRecordList)
 			superSecured.GET("/system/mail-config", handler.AdminMailConfig)
@@ -435,6 +440,7 @@ func main() {
 	// 启动后台邮件到期提醒任务
 	handler.StartMailReminderWorker()
 	handler.StartPurchaseOrderExpiryWorker()
+	handler.StartRealnameExpiryWorker()
 
 	// 兜底迁移：补齐购买订单字段，修正历史线上购买流水与价格快照
 	func() {

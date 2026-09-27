@@ -165,13 +165,6 @@ func LicenseVerify(c *gin.Context) {
 		return
 	}
 
-	// 实名认证门槛：应用要求实名且授权归属未实名用户时拒绝
-	if required, verified, err := userRealnameRequired(db, appID, license.ID); err == nil && required && !verified {
-		writeVerifyLog(db, sql.NullInt64{Int64: license.ID, Valid: true}, appID, req.Domain, req.ServerIP, c.ClientIP(), "fail", "realname_required", c.GetHeader("User-Agent"))
-		c.JSON(http.StatusOK, gin.H{"code": 403, "msg": "该应用要求实名认证，请先在用户中心完成实名后再安装", "data": gin.H{"result": "fail", "reason": "realname_required"}})
-		return
-	}
-
 	if license.Status == "revoked" {
 		writeVerifyLog(db, sql.NullInt64{Int64: license.ID, Valid: true}, appID, req.Domain, req.ServerIP, c.ClientIP(), "fail", "license_revoked", c.GetHeader("User-Agent"))
 		c.JSON(http.StatusOK, gin.H{"code": 403, "msg": "授权已禁用", "data": gin.H{"result": "fail", "reason": "license_revoked"}})
@@ -180,6 +173,23 @@ func LicenseVerify(c *gin.Context) {
 	if license.Status == "expired" || (license.ExpiredAt.Valid && !license.ExpiredAt.Time.After(time.Now())) {
 		writeVerifyLog(db, sql.NullInt64{Int64: license.ID, Valid: true}, appID, req.Domain, req.ServerIP, c.ClientIP(), "expired", "license_expired", c.GetHeader("User-Agent"))
 		c.JSON(http.StatusOK, gin.H{"code": 403, "msg": "授权已过期", "data": gin.H{"result": "expired", "reason": "license_expired"}})
+		return
+	}
+
+	// 实名认证门槛：应用要求实名且授权归属未实名用户时拒绝；
+	// 已过期（超出宽限期）与从未实名使用不同原因，便于日志归因和前端分别提示。
+	// 排在授权状态检查之后，已禁用/已过期的授权优先得到准确的拒绝原因。
+	if required, verified, status, err := userRealnameRequired(db, appID, license.ID); err == nil && required && !verified {
+		reason := realnameBlockedReason(status)
+		if reason == "" {
+			reason = verifyReasonRealnameRequired
+		}
+		message := "该应用要求实名认证，请先在用户中心完成实名后再安装"
+		if reason == verifyReasonRealnameExpired {
+			message = "实名信息已过期，请先在用户中心重新认证后再安装"
+		}
+		writeVerifyLog(db, sql.NullInt64{Int64: license.ID, Valid: true}, appID, req.Domain, req.ServerIP, c.ClientIP(), "fail", reason, c.GetHeader("User-Agent"))
+		c.JSON(http.StatusOK, gin.H{"code": 403, "msg": message, "data": gin.H{"result": "fail", "reason": reason}})
 		return
 	}
 

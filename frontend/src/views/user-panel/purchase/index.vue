@@ -1,5 +1,20 @@
 <template>
   <div class="user-purchase">
+    <!-- 购买前实名门槛提示：后端会在下单时再次校验，这里只做前置引导 -->
+    <el-alert
+      v-if="purchaseRealnameBlocked"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="realname-gate-alert"
+    >
+      <template #title>{{ realnameGateTitle }}</template>
+      <div class="realname-gate-body">
+        <span>{{ realnameGateDesc }}</span>
+        <el-button type="primary" size="small" @click="goRealname">去完成实名</el-button>
+      </div>
+    </el-alert>
+
     <!-- 步骤指示器 -->
     <div class="steps-bar">
       <template v-for="(item, index) in stepItems" :key="item.value">
@@ -251,6 +266,7 @@
               class="purchase-btn"
               :disabled="
                 purchasing ||
+                purchaseRealnameBlocked ||
                 (payMethod === 'balance' && userBalance < computedCost) ||
                 (isOnlinePay && computedCost <= 0)
               "
@@ -424,6 +440,39 @@
     { value: 4, label: '生成授权' }
   ]
 
+  // 购买前实名门槛：后端为准，这里只做展示与跳转引导。
+  const realnameVerified = ref(false)
+  const realnameStatus = ref('ok')
+  const purchaseRealnameRequired = ref(false)
+  const purchaseRealnameBlocked = computed(
+    () => purchaseRealnameRequired.value && !realnameVerified.value
+  )
+  const realnameGateTitle = computed(() =>
+    realnameStatus.value === 'expired' ? '实名信息已过期' : '购买前需完成实名认证'
+  )
+  const realnameGateDesc = computed(() =>
+    realnameStatus.value === 'expired'
+      ? '实名有效期已过，重新认证后才能继续购买授权。'
+      : '本站在购买授权前要求完成实名认证，认证过程约需 1 分钟。'
+  )
+
+  function goRealname() {
+    router.push({ path: '/user/profile', query: { tab: 'realname' } })
+  }
+
+  async function fetchRealnameGate() {
+    try {
+      const { data } = await axios.get('/api/user-panel/profile', { headers: authHeaders.value })
+      if (data.code === 200) {
+        realnameVerified.value = !!data.data?.realnameVerified
+        realnameStatus.value = data.data?.realnameStatus || 'ok'
+        purchaseRealnameRequired.value = !!data.data?.purchaseRealnameRequired
+      }
+    } catch {
+      // 拉取失败时不阻断页面，下单时后端仍会拦截
+    }
+  }
+
   function getToken() {
     return localStorage.getItem('user_panel_token') || ''
   }
@@ -537,6 +586,7 @@
     fetchBalance()
     fetchPayOptions()
     fetchRechargeOptions()
+    fetchRealnameGate()
     handlePurchaseReturn()
     handleRechargeReturn()
   })
@@ -659,6 +709,9 @@
   const purchaseButtonText = computed(() => {
     if (purchasing.value) {
       return isOnlinePay.value ? '正在创建支付订单...' : '正在生成授权...'
+    }
+    if (purchaseRealnameBlocked.value) {
+      return '请先完成实名认证'
     }
     return `确认支付 ¥${computedCost.value.toFixed(2)}`
   })
@@ -939,6 +992,10 @@
 
   async function handlePurchase() {
     if (purchasing.value) return
+    if (purchaseRealnameBlocked.value) {
+      ElMessage.warning('购买前需完成实名认证，请先前往个人设置完成实名')
+      return
+    }
     if (isOnlinePay.value && computedCost.value <= 0) {
       ElMessage.warning('0 元套餐请使用余额支付')
       return
@@ -993,6 +1050,18 @@
   .user-purchase {
     max-width: 960px;
     margin: 0 auto;
+  }
+
+  .realname-gate-alert {
+    margin-bottom: 8px;
+
+    .realname-gate-body {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 6px;
+    }
   }
 
   // 步骤条

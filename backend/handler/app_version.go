@@ -738,8 +738,17 @@ func AppVersionCheck(c *gin.Context) {
 				return
 			}
 		}
-		if required, verified, verifyErr := userRealnameRequired(db, appID, license.ID); verifyErr == nil && required && !verified {
-			apiError(c, 403, "该应用要求实名认证")
+		if required, verified, status, verifyErr := userRealnameRequired(db, appID, license.ID); verifyErr == nil && required && !verified {
+			reason := realnameBlockedReason(status)
+			if reason == "" {
+				reason = verifyReasonRealnameRequired
+			}
+			message := "该应用要求实名认证"
+			if reason == verifyReasonRealnameExpired {
+				message = "实名信息已过期，请重新认证"
+			}
+			writeVerifyLog(db, sql.NullInt64{Int64: license.ID, Valid: true}, appID, req.Domain, req.ServerIP, c.ClientIP(), "fail", reason, c.GetHeader("User-Agent"))
+			apiError(c, 403, message)
 			return
 		}
 	}

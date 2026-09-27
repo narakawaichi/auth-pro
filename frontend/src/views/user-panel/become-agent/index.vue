@@ -60,6 +60,21 @@
         show-icon
       />
 
+      <!-- 升级同属购买行为，未实名时给出前置引导 -->
+      <el-alert
+        v-if="realnameGateActive"
+        class="realname-gate-alert"
+        :title="realnameStatus === 'expired' ? '实名信息已过期' : '开通代理前需完成实名认证'"
+        type="error"
+        :closable="false"
+        show-icon
+      >
+        <div class="realname-gate-body">
+          <span>{{ realnameGateDesc }}</span>
+          <el-button type="primary" size="small" @click="goRealname">去完成实名</el-button>
+        </div>
+      </el-alert>
+
       <div v-loading="loading" class="upgrade-content">
         <section class="level-section">
           <div class="section-title">
@@ -233,7 +248,11 @@
                 size="large"
                 class="submit-button"
                 :loading="submitting"
-                :disabled="!confirmed || (payMethod === 'balance' && !selectedLevel.canAfford)"
+                :disabled="
+                  !confirmed ||
+                  realnameGateActive ||
+                  (payMethod === 'balance' && !selectedLevel.canAfford)
+                "
                 @click="submitUpgrade"
               >
                 <iconify-icon icon="ri:secure-payment-line" />
@@ -339,6 +358,34 @@
 
   function authHeaders() {
     return { Authorization: `Bearer ${localStorage.getItem('user_panel_token') || ''}` }
+  }
+
+  // 升级为代理同样属于购买行为，未实名/实名过期时前端先给出提示，最终以后端校验为准。
+  const realnameVerified = ref(true)
+  const realnameStatus = ref('ok')
+  const upgradeRealnameRequired = ref(false)
+  const realnameGateActive = computed(() => upgradeRealnameRequired.value && !realnameVerified.value)
+  const realnameGateDesc = computed(() =>
+    realnameStatus.value === 'expired'
+      ? '实名有效期已过，重新认证后才能开通代理账户。'
+      : '开通代理账户前需要完成实名认证，认证过程约需 1 分钟。'
+  )
+
+  function goRealname() {
+    router.push({ path: '/user/profile', query: { tab: 'realname' } })
+  }
+
+  async function fetchRealnameGate() {
+    try {
+      const { data } = await axios.get('/api/user-panel/profile', { headers: authHeaders() })
+      if (data.code === 200) {
+        realnameVerified.value = data.data?.realnameVerified !== false
+        realnameStatus.value = data.data?.realnameStatus || 'ok'
+        upgradeRealnameRequired.value = !!data.data?.purchaseRealnameRequired
+      }
+    } catch {
+      // 拉取失败不阻断页面，提交时后端仍会拦截
+    }
   }
 
   function money(value: unknown) {
@@ -485,6 +532,10 @@
 
   async function submitUpgrade() {
     if (!selectedLevel.value || !confirmed.value || submitting.value) return
+    if (realnameGateActive.value) {
+      ElMessage.warning('开通代理账户前需完成实名认证，请先前往个人设置完成实名')
+      return
+    }
     if (payMethod.value === 'balance' && !selectedLevel.value.canAfford) {
       ElMessage.warning('当前余额不足，请选择在线支付方式')
       return
@@ -559,7 +610,10 @@
     router.replace(result.value?.loginPath || '/agent-panel/login?upgraded=1')
   }
 
-  onMounted(loadLevels)
+  onMounted(() => {
+    loadLevels()
+    fetchRealnameGate()
+  })
   onBeforeUnmount(() => {
     if (redirectTimer) window.clearInterval(redirectTimer)
   })
@@ -647,6 +701,18 @@
 
   .risk-alert {
     margin-top: 12px;
+  }
+
+  .realname-gate-alert {
+    margin-top: 12px;
+
+    .realname-gate-body {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 6px;
+    }
   }
 
   .upgrade-content {

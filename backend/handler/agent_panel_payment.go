@@ -339,6 +339,10 @@ func userPurchaseOnline(c *gin.Context, appID int64, planID int64, licenseType s
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "数据库连接失败"})
 		return
 	}
+	// 购买前实名门槛：在线支付同样先校验，防止绕过余额路径的检查。
+	if realnamePurchaseBlocked(c, db, "user", int64(userID), "user", int64(userID)) {
+		return
+	}
 	if err := ensureAppPurchaseLicenseTypes(db); err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "初始化应用授权方式失败"})
 		return
@@ -453,6 +457,14 @@ func agentPanelPurchaseOnline(c *gin.Context, appID int64, planID int64, userID 
 	db, err := openAppPurchaseDB()
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "数据库连接失败"})
+		return
+	}
+	// 购买前实名门槛：代理本人需实名；为名下用户开通时按配置同时校验目标用户。
+	lnameOwnerType, lnameOwnerID := "agent", int64(agentID)
+	if userID > 0 {
+		lnameOwnerType, lnameOwnerID = "user", userID
+	}
+	if realnamePurchaseBlocked(c, db, "agent", int64(agentID), lnameOwnerType, lnameOwnerID) {
 		return
 	}
 	if err := ensureAppPurchaseLicenseTypes(db); err != nil {
