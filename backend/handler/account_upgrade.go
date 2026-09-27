@@ -270,6 +270,8 @@ type accountUpgradeUser struct {
 	RealName      string
 	RealIDCard    string
 	RealnameAt    sql.NullTime
+	// RealnameExpiresAt 随主体迁移到代理账户，升级后实名有效期不丢失。
+	RealnameExpiresAt sql.NullTime
 }
 
 func insertAgentUpgradeOrder(tx *sql.Tx, order accountUpgradeOrder) error {
@@ -416,10 +418,10 @@ func settleAgentUpgradeOrderTx(tx *sql.Tx, orderNo string, payment accountUpgrad
 		INSERT INTO agents (
 			email, password_hash, name, contact, level, discount, balance,
 			source, original_user_id, converted_at, remark, enabled,
-			real_name, real_id_card, realname_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, 'user_upgrade', ?, ?, ?, 1, ?, ?, ?)
+			real_name, real_id_card, realname_at, realname_expires_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, 'user_upgrade', ?, ?, ?, 1, ?, ?, ?, ?)
 	`, user.Email, user.PasswordHash, agentName, contact, order.LevelCode, order.Discount,
-		formatCents(finalAgentBalanceCents), user.ID, now, "用户自助开通代理", user.RealName, user.RealIDCard, user.RealnameAt)
+		formatCents(finalAgentBalanceCents), user.ID, now, "用户自助开通代理", user.RealName, user.RealIDCard, user.RealnameAt, user.RealnameExpiresAt)
 	if err != nil {
 		return accountConversionResult{}, fmt.Errorf("创建代理账户失败: %w", err)
 	}
@@ -594,10 +596,12 @@ func lockAccountUpgradeUser(tx *sql.Tx, userID uint64) (accountUpgradeUser, int6
 	var user accountUpgradeUser
 	err := tx.QueryRow(`
 		SELECT id, email, phone, password_hash, COALESCE(nickname, ''), balance,
-		       account_status, enabled, COALESCE(real_name, ''), COALESCE(real_id_card, ''), realname_at
+		       account_status, enabled, COALESCE(real_name, ''), COALESCE(real_id_card, ''), realname_at,
+		       realname_expires_at
 		FROM users WHERE id = ? FOR UPDATE
 	`, userID).Scan(&user.ID, &user.Email, &user.Phone, &user.PasswordHash, &user.Nickname,
-		&user.BalanceText, &user.AccountStatus, &user.Enabled, &user.RealName, &user.RealIDCard, &user.RealnameAt)
+		&user.BalanceText, &user.AccountStatus, &user.Enabled, &user.RealName, &user.RealIDCard, &user.RealnameAt,
+		&user.RealnameExpiresAt)
 	if err != nil {
 		return accountUpgradeUser{}, 0, err
 	}
@@ -799,6 +803,11 @@ func UserAgentUpgradeCreate(c *gin.Context) {
 	db, err := openAccountUpgradeDB()
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "代理升级服务初始化失败"})
+		return
+	}
+
+	// 账户升级属于付费行为，开启购买前实名后同样需要用户本人已实名。
+	if realnamePurchaseBlocked(c, db, "user", int64(userID), "user", int64(userID)) {
 		return
 	}
 

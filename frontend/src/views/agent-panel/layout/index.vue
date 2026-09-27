@@ -80,6 +80,20 @@
           )
         }"
       >
+        <!-- 实名即将过期/已进入宽限期时，在内容区顶部常驻提示 -->
+        <el-alert
+          v-if="realnameNotice"
+          class="realname-notice"
+          :title="realnameNotice"
+          type="warning"
+          :closable="false"
+          show-icon
+        >
+          <div class="realname-notice-body">
+            <span v-if="realnameExpiresAt">有效期至 {{ realnameExpiresAt }}</span>
+            <el-button type="primary" size="small" @click="goRealname">去重新认证</el-button>
+          </div>
+        </el-alert>
         <router-view />
       </main>
     </div>
@@ -102,7 +116,29 @@
   const { siteName, resolvedLogo } = storeToRefs(systemConfigStore)
   const collapsed = ref(false)
   const ticketUnread = ref(0)
+  const realnameNotice = ref('')
+  const realnameExpiresAt = ref('')
   let ticketUnreadTimer: ReturnType<typeof setInterval> | null = null
+
+  function goRealname() {
+    router.push('/agent-panel/profile')
+  }
+
+  // 实名提醒：后端已按 grace_days/remind_days 判定，前端只负责展示。
+  async function fetchRealnameNotice() {
+    try {
+      const { data } = await axios.get('/api/agent-panel/profile', {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('agent_panel_token') || ''}`
+        }
+      })
+      if (data.code !== 200) return
+      realnameNotice.value = data.data?.realnameNotice || ''
+      realnameExpiresAt.value = data.data?.realnameExpiresAt || ''
+    } catch {
+      /* 提示条非关键路径，失败时静默忽略。 */
+    }
+  }
 
   async function fetchTicketUnread() {
     try {
@@ -119,13 +155,16 @@
 
   onMounted(() => {
     fetchTicketUnread()
+    fetchRealnameNotice()
     ticketUnreadTimer = setInterval(fetchTicketUnread, 30000)
     window.addEventListener('panel-ticket-unread-refresh', fetchTicketUnread)
+    window.addEventListener('agent-panel-realname-refresh', fetchRealnameNotice)
   })
 
   onBeforeUnmount(() => {
     if (ticketUnreadTimer) clearInterval(ticketUnreadTimer)
     window.removeEventListener('panel-ticket-unread-refresh', fetchTicketUnread)
+    window.removeEventListener('agent-panel-realname-refresh', fetchRealnameNotice)
   })
 
   const currentRoute = computed(() => route.path)
@@ -280,6 +319,18 @@
 
     &.is-panel-surface {
       background: var(--el-bg-color);
+    }
+
+    .realname-notice {
+      margin-bottom: 12px;
+
+      .realname-notice-body {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 6px;
+      }
     }
   }
 </style>

@@ -63,7 +63,7 @@ var pluginCatalog = []pluginInfo{
 		ID:          "alipay-realname",
 		Category:    "realname",
 		Name:        "支付宝实名认证",
-		Description: "金融级实人认证，用户扫码刷脸完成核验，权威性强",
+		Description: "金融级实人认证，支持扫码刷脸与支付宝信息比对授权两种模式，认证模式在系统配置中切换",
 		Icon:        "ri:alipay-line",
 		Version:     "1.0.0",
 		Official:    true,

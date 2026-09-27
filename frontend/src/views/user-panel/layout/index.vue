@@ -80,6 +80,20 @@
           )
         }"
       >
+        <!-- 实名即将过期/已进入宽限期时，在内容区顶部常驻提示 -->
+        <el-alert
+          v-if="realnameNotice"
+          class="realname-notice"
+          :title="realnameNotice"
+          type="warning"
+          :closable="false"
+          show-icon
+        >
+          <div class="realname-notice-body">
+            <span v-if="realnameExpiresAt">有效期至 {{ realnameExpiresAt }}</span>
+            <el-button type="primary" size="small" @click="goRealname">去重新认证</el-button>
+          </div>
+        </el-alert>
         <router-view />
       </main>
       <footer v-if="icpNumber" class="panel-footer">
@@ -109,7 +123,27 @@
   const balance = ref(0)
   const nickname = ref('')
   const ticketUnread = ref(0)
+  const realnameNotice = ref('')
+  const realnameExpiresAt = ref('')
   let ticketUnreadTimer: ReturnType<typeof setInterval> | null = null
+
+  function goRealname() {
+    router.push({ path: '/user/profile', query: { tab: 'realname' } })
+  }
+
+  // 实名提醒：后端已按 grace_days/remind_days 判定，前端只负责展示。
+  async function fetchRealnameNotice() {
+    try {
+      const { data } = await axios.get('/api/user-panel/profile', {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      })
+      if (data.code !== 200) return
+      realnameNotice.value = data.data?.realnameNotice || ''
+      realnameExpiresAt.value = data.data?.realnameExpiresAt || ''
+    } catch {
+      /* 提示条非关键路径，失败时静默忽略。 */
+    }
+  }
 
   function getToken() {
     return localStorage.getItem('user_panel_token') || ''
@@ -152,15 +186,18 @@
     loadUserInfo()
     fetchBalance()
     fetchTicketUnread()
+    fetchRealnameNotice()
     ticketUnreadTimer = setInterval(fetchTicketUnread, 30000)
     window.addEventListener('user-panel-balance-refresh', fetchBalance)
     window.addEventListener('panel-ticket-unread-refresh', fetchTicketUnread)
+    window.addEventListener('user-panel-realname-refresh', fetchRealnameNotice)
   })
 
   onBeforeUnmount(() => {
     if (ticketUnreadTimer) clearInterval(ticketUnreadTimer)
     window.removeEventListener('user-panel-balance-refresh', fetchBalance)
     window.removeEventListener('panel-ticket-unread-refresh', fetchTicketUnread)
+    window.removeEventListener('user-panel-realname-refresh', fetchRealnameNotice)
   })
 
   watch(
@@ -333,6 +370,18 @@
 
     &.is-panel-surface {
       background: var(--el-bg-color);
+    }
+
+    .realname-notice {
+      margin-bottom: 12px;
+
+      .realname-notice-body {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 6px;
+      }
     }
   }
 

@@ -365,32 +365,64 @@
               <div class="section-title">
                 <div>
                   <strong>实名认证</strong>
-                  <span>支持支付宝、快瞳和靓仔聚合认证，按应用控制是否强制用户实名</span>
+                  <span>支持支付宝、快瞳、靓仔聚合认证与小沐聚合实名，可按应用或全局强制实名</span>
                 </div>
                 <ElTag :type="realnameForm.enabled ? 'success' : 'info'" effect="light">
                   {{ realnameForm.enabled ? '已启用' : '未启用' }}
                 </ElTag>
               </div>
 
-              <!-- 启用开关 -->
+              <!-- 生效范围：关闭 / 按应用 / 全部应用 -->
               <div class="realname-master-switch" :class="{ 'is-enabled': realnameForm.enabled }">
                 <div class="switch-content">
                   <div class="switch-icon">
                     <ArtSvgIcon icon="ri:shield-user-line" />
                   </div>
                   <div>
-                    <strong>启用实名认证</strong>
-                    <span>开启后，勾选了「要求实名」的应用将拦截未实名用户的授权安装</span>
+                    <strong>生效范围</strong>
+                    <span v-if="!realnameForm.enabled">实名认证未启用，用户端不会出现实名入口</span>
+                    <span v-else-if="realnameForm.scope === 'all'">
+                      全部应用强制实名：所有应用（含今后新增）都会拦截未实名用户
+                    </span>
+                    <span v-else>按应用要求实名：只有下方勾选的应用会拦截未实名用户</span>
                   </div>
                 </div>
-                <ElSwitch
-                  v-model="realnameForm.enabled"
-                  inline-prompt
-                  active-text="开启"
-                  inactive-text="关闭"
-                  size="large"
-                />
+                <ElRadioGroup
+                  v-model="realnameForm.scope"
+                  :disabled="!realnameConfig.pluginEnabled"
+                  @change="handleRealnameScopeChange"
+                >
+                  <ElRadioButton value="off">关闭</ElRadioButton>
+                  <ElRadioButton value="by_app">按应用要求实名</ElRadioButton>
+                  <ElRadioButton value="all">全部应用强制实名</ElRadioButton>
+                </ElRadioGroup>
               </div>
+              <ElAlert
+                v-if="realnameForm.scope === 'all' && realnameForm.enabled"
+                type="warning"
+                :closable="false"
+                class="mb-3"
+              >
+                <template #title>全部应用强制实名已生效</template>
+                <span v-if="realnameImpact">
+                  当前有 {{ realnameImpact.unverifiedUsers }} 个用户、{{
+                    realnameImpact.unverifiedAgents
+                  }}
+                  个代理未实名，涉及 {{ realnameImpact.affectedLicenses }} 个有效授权将被拦截。最近
+                  {{ realnameImpact.windowDays }} 天已被实名门槛拦截
+                  {{ realnameImpact.blockedRequests }} 次请求。
+                </span>
+                <span v-else>请在保存前确认影响面，避免一次性拦住大量线上应用。</span>
+                <div class="impact-actions">
+                  <ElButton
+                    size="small"
+                    :loading="realnameImpactLoading"
+                    @click="loadRealnameImpact"
+                  >
+                    刷新影响面预估
+                  </ElButton>
+                </div>
+              </ElAlert>
 
               <ElRow :gutter="24" class="realname-body">
                 <!-- 左：接口配置 -->
@@ -702,6 +734,21 @@
                       </div>
                     </div>
 
+                    <ElFormItem label="认证模式">
+                      <ElRadioGroup v-model="realnameForm.alipayAuthMode">
+                        <ElRadioButton value="face">扫码刷脸</ElRadioButton>
+                        <ElRadioButton value="info">信息比对授权</ElRadioButton>
+                      </ElRadioGroup>
+                      <div class="field-hint">
+                        <span v-if="realnameForm.alipayAuthMode === 'face'">
+                          用户提交姓名身份证后，在支付宝 App 内完成刷脸核验
+                        </span>
+                        <span v-else>
+                          免刷脸：录入信息后用户扫码/唤起支付宝完成授权，由支付宝比对实名信息是否一致。需在支付宝开放平台签约「实名信息验证」产品，并将本站域名加入应用的授权回调地址；仅支持已完成支付宝实名的个人账户
+                        </span>
+                      </div>
+                    </ElFormItem>
+
                     <ElFormItem label="支付宝应用 AppID">
                       <ElInput
                         v-model.trim="realnameForm.appId"
@@ -810,17 +857,180 @@
                         <li>需要在聚合实名认证平台开通「腾讯云增强人脸」产品</li>
                         <li>用户输入姓名 + 身份证号后扫码拍照，服务端提交人脸 Base64 完成核验</li>
                       </template>
-                      <li>勾选应用对未实名用户返回 <code>realname_required</code>，禁止安装</li>
-                      <li>未勾选的应用不受实名限制，可正常安装使用</li>
+                      <li v-if="realnameForm.scope === 'all'">
+                        全部应用强制实名，对未实名用户返回
+                        <code>realname_required</code>，禁止安装
+                      </li>
+                      <li v-else-if="realnameForm.scope === 'off'">
+                        实名认证已关闭，所有应用都不受实名限制
+                      </li>
+                      <li v-else>
+                        勾选应用对未实名用户返回 <code>realname_required</code>，禁止安装
+                      </li>
+                      <li v-if="realnameForm.scope !== 'all'">
+                        未勾选的应用不受实名限制，可正常安装使用
+                      </li>
+                      <li v-if="realnameForm.validityDays > 0">
+                        实名有效期 {{ realnameForm.validityDays }} 天，到期后仍在
+                        {{ realnameForm.graceDays }} 天宽限期内可继续使用
+                      </li>
+                      <li v-if="realnameForm.graceDays > 0 && realnameForm.validityDays > 0">
+                        超过宽限期后返回 <code>realname_expired</code>，需重新认证
+                      </li>
+                      <li>管理员后台直接创建的授权不受实名限制</li>
                     </ul>
+                  </div>
+                </ElCol>
+              </ElRow>
+
+              <!-- 购买门槛 + 有效期设置 -->
+              <ElRow :gutter="24" class="realname-body">
+                <ElCol :xs="24" :lg="14">
+                  <div class="config-block">
+                    <div class="block-header">
+                      <span class="block-num">2</span>
+                      <div>
+                        <strong>购买前实名门槛</strong>
+                        <span>开启后，购买或开通授权前需要先完成实名</span>
+                      </div>
+                    </div>
+                    <ElFormItem label="购买前需实名">
+                      <ElSwitch
+                        v-model="realnameForm.purchaseRequired"
+                        inline-prompt
+                        active-text="开启"
+                        inactive-text="关闭"
+                        :disabled="!realnameConfig.pluginEnabled || !realnameForm.enabled"
+                      />
+                      <div class="field-hint">
+                        <ArtSvgIcon icon="ri:information-line" />
+                        <span v-if="!realnameForm.enabled">
+                          需先开启实名认证才能启用购买门槛，否则用户无法完成认证
+                        </span>
+                        <span v-else>
+                          用户余额/在线支付购买、代理开通授权、用户自助升级代理都会先校验实名
+                        </span>
+                      </div>
+                    </ElFormItem>
+                    <ElFormItem v-if="realnameForm.purchaseRequired" label="同时校验目标用户">
+                      <ElSwitch v-model="realnameForm.purchaseCheckOwner" />
+                      <div class="field-hint">
+                        <ArtSvgIcon icon="ri:information-line" />
+                        <span>
+                          代理为名下用户开通授权时，除代理本人外，还要求目标用户也完成实名
+                        </span>
+                      </div>
+                    </ElFormItem>
                   </div>
 
                   <div class="config-block">
                     <div class="block-header">
                       <span class="block-num">3</span>
                       <div>
+                        <strong>实名有效期与复核</strong>
+                        <span>到期后需重新认证，可在宽限期内继续使用</span>
+                      </div>
+                    </div>
+                    <ElFormItem label="有效期">
+                      <ElInputNumber
+                        v-model="realnameForm.validityDays"
+                        :min="0"
+                        :max="36500"
+                        :step="30"
+                        style="width: 200px"
+                      />
+                      <span class="unit-text">天（0 表示永不过期）</span>
+                      <div class="field-hint">
+                        <ArtSvgIcon icon="ri:information-line" />
+                        <span>
+                          每次认证成功按该天数计算有效期；设置为 0 时实名永久有效，与升级前行为一致
+                        </span>
+                      </div>
+                    </ElFormItem>
+                    <ElFormItem v-if="realnameForm.validityDays > 0" label="到期宽限期">
+                      <ElInputNumber
+                        v-model="realnameForm.graceDays"
+                        :min="0"
+                        :max="3650"
+                        :step="1"
+                        style="width: 200px"
+                      />
+                      <span class="unit-text">天（0 表示到期立即拦截）</span>
+                    </ElFormItem>
+                    <ElFormItem v-if="realnameForm.validityDays > 0" label="到期前提醒">
+                      <ElInputNumber
+                        v-model="realnameForm.remindDays"
+                        :min="0"
+                        :max="3650"
+                        :step="1"
+                        style="width: 200px"
+                      />
+                      <span class="unit-text">天（0 表示不提醒）</span>
+                      <div class="field-hint">
+                        <ArtSvgIcon icon="ri:information-line" />
+                        <span> 站内与邮件同时提醒，邮件模板在「邮件设置」中单独维护 </span>
+                      </div>
+                    </ElFormItem>
+                    <ElFormItem label="复核允许更换证件">
+                      <ElSwitch v-model="realnameForm.allowIdentityChange" />
+                      <div class="field-hint">
+                        <ArtSvgIcon icon="ri:information-line" />
+                        <span v-if="realnameForm.allowIdentityChange">
+                          用户可提交新的姓名与身份证号覆盖原实名信息，历史记录仍保留在认证记录中
+                        </span>
+                        <span v-else> 只允许本人以相同证件重新认证，适用于有合规要求的场景 </span>
+                      </div>
+                    </ElFormItem>
+                    <ElFormItem label="存量实名处理">
+                      <ElRadioGroup
+                        v-model="realnameForm.legacyPolicy"
+                        :disabled="realnameForm.validityDays <= 0"
+                      >
+                        <ElRadioButton value="keep">保持永不过期</ElRadioButton>
+                        <ElRadioButton value="backfill">按认证时间补算</ElRadioButton>
+                      </ElRadioGroup>
+                      <div class="field-hint">
+                        <ArtSvgIcon icon="ri:information-line" />
+                        <span v-if="realnameForm.validityDays <= 0">
+                          需先设置大于 0 的有效期才能处理存量用户
+                        </span>
+                        <span v-else-if="realnameForm.legacyPolicy === 'keep'">
+                          现有已实名用户保持永不过期，只有新认证开始计算有效期（最稳妥）
+                        </span>
+                        <span v-else>
+                          保存时按「认证时间 +
+                          有效期」批量补算存量用户，可能一次性产生大批待复核用户
+                        </span>
+                      </div>
+                      <ElButton
+                        v-if="realnameForm.validityDays > 0"
+                        size="small"
+                        :loading="realnameLegacyResetting"
+                        @click="handleRealnameLegacyReset"
+                      >
+                        批量重置未设有效期的存量实名
+                      </ElButton>
+                      <ElButton
+                        size="small"
+                        :loading="realnameLegacyClearing"
+                        @click="handleRealnameLegacyClear"
+                      >
+                        撤销补算，全部恢复永久有效
+                      </ElButton>
+                    </ElFormItem>
+                  </div>
+                </ElCol>
+
+                <ElCol :xs="24" :lg="10">
+                  <div class="config-block">
+                    <div class="block-header">
+                      <span class="block-num">4</span>
+                      <div>
                         <strong>实名应用范围</strong>
-                        <span>勾选的应用将强制要求用户完成实名</span>
+                        <span v-if="realnameForm.scope === 'all'">
+                          全部应用强制实名，应用列表已不生效
+                        </span>
+                        <span v-else>勾选的应用将强制要求用户完成实名</span>
                       </div>
                       <ElText class="block-count" type="info" size="small">
                         已选 {{ realnameForm.requireAppIds.length }} /
@@ -828,25 +1038,54 @@
                       </ElText>
                     </div>
 
-                    <div v-if="realnameConfig.apps.length" class="app-select-list">
+                    <ElAlert
+                      v-if="realnameForm.scope === 'all'"
+                      type="info"
+                      :closable="false"
+                      title="当前为全部应用强制实名"
+                      description="所有应用（含今后新增）都会要求实名，无需再逐个勾选"
+                      class="mb-3"
+                    />
+
+                    <div
+                      v-if="realnameConfig.apps.length"
+                      class="app-select-list"
+                      :class="{ 'is-disabled': realnameForm.scope === 'all' }"
+                    >
                       <div
                         v-for="app in realnameConfig.apps"
                         :key="app.id"
                         class="app-select-item"
-                        :class="{ 'is-checked': realnameForm.requireAppIds.includes(app.id) }"
-                        @click="toggleRequireApp(app.id)"
+                        :class="{
+                          'is-checked':
+                            realnameForm.scope !== 'all' &&
+                            realnameForm.requireAppIds.includes(app.id),
+                          'is-muted': realnameForm.scope === 'all'
+                        }"
+                        @click="handleToggleRequireApp(app.id)"
                       >
                         <ElCheckbox
-                          :model-value="realnameForm.requireAppIds.includes(app.id)"
+                          :model-value="
+                            realnameForm.scope === 'all' ||
+                            realnameForm.requireAppIds.includes(app.id)
+                          "
+                          :disabled="realnameForm.scope === 'all'"
                           @click.stop
-                          @change="() => toggleRequireApp(app.id)"
+                          @change="() => handleToggleRequireApp(app.id)"
                         />
                         <div class="app-info">
                           <strong>{{ app.appName }}</strong>
                           <span>{{ app.appKey }}</span>
                         </div>
                         <ElTag
-                          v-if="realnameForm.requireAppIds.includes(app.id)"
+                          v-if="realnameForm.scope === 'all'"
+                          type="success"
+                          size="small"
+                          effect="light"
+                          >全局生效</ElTag
+                        >
+                        <ElTag
+                          v-else-if="realnameForm.requireAppIds.includes(app.id)"
                           type="warning"
                           size="small"
                           effect="light"
@@ -901,6 +1140,25 @@
                   <ElOption label="认证成功" value="passed" />
                   <ElOption label="认证失败" value="failed" />
                 </ElSelect>
+                <ElSelect
+                  v-model="recordQuery.recordType"
+                  placeholder="认证类型"
+                  clearable
+                  style="width: 120px"
+                >
+                  <ElOption label="首次认证" value="init" />
+                  <ElOption label="复核" value="review" />
+                </ElSelect>
+                <ElSelect
+                  v-model="recordQuery.validity"
+                  placeholder="实名状态"
+                  clearable
+                  style="width: 130px"
+                >
+                  <ElOption label="即将过期" value="expiring" />
+                  <ElOption label="已过期" value="expired" />
+                  <ElOption label="永久有效" value="permanent" />
+                </ElSelect>
                 <ElButton type="primary" @click="handleRecordSearch">查询</ElButton>
               </div>
 
@@ -924,6 +1182,17 @@
                 </ElTableColumn>
                 <ElTableColumn prop="realName" label="姓名" width="90" />
                 <ElTableColumn prop="idCard" label="身份证号" min-width="150" />
+                <ElTableColumn label="类型" width="80">
+                  <template #default="{ row }">
+                    <ElTag
+                      :type="row.recordType === 'review' ? 'warning' : 'info'"
+                      size="small"
+                      effect="plain"
+                    >
+                      {{ row.recordType === 'review' ? '复核' : '首次' }}
+                    </ElTag>
+                  </template>
+                </ElTableColumn>
                 <ElTableColumn label="服务商" width="90">
                   <template #default="{ row }">
                     {{ realnameProviderName(row.provider) }}
@@ -940,7 +1209,23 @@
                     </ElTag>
                   </template>
                 </ElTableColumn>
-                <ElTableColumn label="详细失败原因" min-width="420">
+                <ElTableColumn label="实名状态" width="110">
+                  <template #default="{ row }">
+                    <ElTag
+                      :type="realnameValidityTagType(row.validity)"
+                      size="small"
+                      effect="light"
+                    >
+                      {{ realnameValidityText(row.validity) }}
+                    </ElTag>
+                  </template>
+                </ElTableColumn>
+                <ElTableColumn label="有效期至" width="150">
+                  <template #default="{ row }">
+                    {{ row.ownerExpiresAt || '永久' }}
+                  </template>
+                </ElTableColumn>
+                <ElTableColumn label="详细失败原因" min-width="360">
                   <template #default="{ row }">
                     <div v-if="row.status === 'failed'" class="record-fail-reason">
                       {{ row.failReason || '-' }}
@@ -979,19 +1264,25 @@
 
 <script setup lang="ts">
   import type { FormInstance, FormRules } from 'element-plus'
-  import { ElMessage } from 'element-plus'
+  import { ElMessage, ElMessageBox } from 'element-plus'
   import {
     fetchSystemConfig,
     fetchUpdateSystemConfig,
     fetchUpdateSystemFeatureSwitch,
     fetchRealnameConfig,
     fetchUpdateRealnameConfig,
-    fetchRealnameRecords
+    fetchRealnameRecords,
+    fetchRealnameImpact,
+    resetRealnameLegacyValidity
   } from '@/api/system-manage'
   import type {
+    AlipayAuthMode,
     KuaitongAuthType,
+    RealnameImpactData,
+    RealnameLegacyPolicy,
     RealnameProvider,
     RealnameRecordItem,
+    RealnameScope,
     XiaomuProductMode
   } from '@/api/system-manage'
   import type {
@@ -1021,6 +1312,7 @@
     privateKeySet: false,
     alipayPublicKey: '',
     gateway: 'https://openapi.alipay.com/gateway.do',
+    alipayAuthMode: 'face',
     kuaitongAccessKey: '',
     kuaitongSecretSet: false,
     kuaitongAuthType: 'face',
@@ -1034,6 +1326,14 @@
     xiaomuBaseUrl: 'https://smapi.x1m1.cn',
     xiaomuProductMode: 'three_element',
     requireAppIds: [],
+    scope: 'by_app',
+    purchaseRequired: false,
+    purchaseCheckOwner: true,
+    validityDays: 0,
+    graceDays: 15,
+    remindDays: 30,
+    allowIdentityChange: true,
+    legacyPolicy: 'keep',
     apps: []
   })
   const realnameForm = reactive({
@@ -1043,6 +1343,7 @@
     privateKey: '',
     alipayPublicKey: '',
     gateway: 'https://openapi.alipay.com/gateway.do',
+    alipayAuthMode: 'face' as AlipayAuthMode,
     kuaitongAccessKey: '',
     kuaitongSecret: '',
     kuaitongAuthType: 'face' as KuaitongAuthType,
@@ -1054,9 +1355,22 @@
     xiaomuAppSecret: '',
     xiaomuBaseUrl: 'https://smapi.x1m1.cn',
     xiaomuProductMode: 'three_element' as XiaomuProductMode,
-    requireAppIds: [] as number[]
+    requireAppIds: [] as number[],
+    scope: 'off' as RealnameScope | 'off',
+    purchaseRequired: false,
+    purchaseCheckOwner: true,
+    validityDays: 0,
+    graceDays: 15,
+    remindDays: 30,
+    allowIdentityChange: true,
+    legacyPolicy: 'keep' as RealnameLegacyPolicy
   })
   const realnameSaving = ref(false)
+  // 影响面预演：切到「全部应用强制实名」时展示预计影响，避免误伤线上。
+  const realnameImpact = ref<RealnameImpactData | null>(null)
+  const realnameImpactLoading = ref(false)
+  const realnameLegacyResetting = ref(false)
+  const realnameLegacyClearing = ref(false)
   const featureSwitchSavingState = reactive<Record<SystemFeatureSwitchKey, boolean>>({
     registrationEnabled: false,
     selfPurchaseEnabled: false,
@@ -1143,7 +1457,9 @@
     pageSize: 10,
     keyword: '',
     provider: '',
-    status: '' as '' | 'passed' | 'failed'
+    status: '' as '' | 'passed' | 'failed',
+    recordType: '' as '' | 'init' | 'review',
+    validity: '' as '' | 'expired' | 'expiring' | 'permanent'
   })
 
   const loadRealnameRecords = async () => {
@@ -1154,7 +1470,9 @@
         pageSize: recordQuery.pageSize,
         keyword: recordQuery.keyword || undefined,
         provider: recordQuery.provider || undefined,
-        status: recordQuery.status || undefined
+        status: recordQuery.status || undefined,
+        recordType: recordQuery.recordType || undefined,
+        validity: recordQuery.validity || undefined
       })
       recordList.value = data.list || []
       recordTotal.value = data.total
@@ -1168,6 +1486,21 @@
   const handleRecordSearch = () => {
     recordQuery.page = 1
     loadRealnameRecords()
+  }
+
+  const realnameValidityText = (validity: string) => {
+    if (validity === 'unverified') return '未实名'
+    if (validity === 'permanent') return '永久有效'
+    if (validity === 'expiring') return '即将过期'
+    if (validity === 'expired') return '已过期'
+    return '有效'
+  }
+
+  const realnameValidityTagType = (validity: string) => {
+    if (validity === 'expired' || validity === 'unverified') return 'danger'
+    if (validity === 'expiring') return 'warning'
+    if (validity === 'permanent') return 'info'
+    return 'success'
   }
 
   const realnameProviderName = (provider: string) => {
@@ -1209,6 +1542,7 @@
         privateKey: '',
         alipayPublicKey: data.alipayPublicKey,
         gateway: data.gateway || 'https://openapi.alipay.com/gateway.do',
+        alipayAuthMode: data.alipayAuthMode || 'face',
         kuaitongAccessKey: data.kuaitongAccessKey,
         kuaitongSecret: '',
         kuaitongAuthType: data.kuaitongAuthType || 'face',
@@ -1220,10 +1554,84 @@
         xiaomuAppSecret: '',
         xiaomuBaseUrl: data.xiaomuBaseUrl || 'https://smapi.x1m1.cn',
         xiaomuProductMode: data.xiaomuProductMode || 'three_element',
-        requireAppIds: [...data.requireAppIds]
+        requireAppIds: [...data.requireAppIds],
+        // 三态范围由 enabled + scope 组合表达，关闭态用 'off' 单独表示，方便 UI 单选。
+        scope: data.enabled ? data.scope || 'by_app' : 'off',
+        purchaseRequired: !!data.purchaseRequired,
+        purchaseCheckOwner: data.purchaseCheckOwner ?? true,
+        validityDays: Number(data.validityDays || 0),
+        graceDays: data.graceDays ?? 15,
+        remindDays: data.remindDays ?? 30,
+        allowIdentityChange: data.allowIdentityChange ?? true,
+        legacyPolicy: data.legacyPolicy || 'keep'
       })
+      // 全局范围下主动拉一次影响面，便于管理员随时查看。
+      if (realnameForm.scope === 'all') {
+        loadRealnameImpact()
+      }
     } catch {
       ElMessage.error('实名认证配置加载失败')
+    }
+  }
+
+  const loadRealnameImpact = async () => {
+    realnameImpactLoading.value = true
+    try {
+      realnameImpact.value = await fetchRealnameImpact()
+    } catch {
+      realnameImpact.value = null
+    } finally {
+      realnameImpactLoading.value = false
+    }
+  }
+
+  // 范围切换：切到关闭时同步 enabled=false；切到全局时预演影响面。
+  const handleRealnameScopeChange = (value: string | number | boolean | undefined) => {
+    const scope = String(value)
+    realnameForm.enabled = scope !== 'off'
+    if (scope === 'all') {
+      loadRealnameImpact()
+      return
+    }
+    realnameImpact.value = null
+  }
+
+  const handleToggleRequireApp = (id: number) => {
+    if (realnameForm.scope === 'all') return
+    toggleRequireApp(id)
+  }
+
+  const handleRealnameLegacyReset = async () => {
+    realnameLegacyResetting.value = true
+    try {
+      const result = await resetRealnameLegacyValidity('unbackfilled')
+      ElMessage.success(`已重置 ${result.affected} 个存量实名主体的有效期`)
+      loadRealnameRecords()
+    } catch {
+      ElMessage.error('存量实名有效期重置失败')
+    } finally {
+      realnameLegacyResetting.value = false
+    }
+  }
+
+  // 撤销补算：清空所有主体的实名到期时间，恢复永久有效。
+  const handleRealnameLegacyClear = async () => {
+    const confirmed = await ElMessageBox.confirm(
+      '将清空所有用户与代理商的实名到期时间，全部恢复为永久有效。确认继续吗？',
+      '撤销存量补算确认',
+      { type: 'warning', confirmButtonText: '确认恢复', cancelButtonText: '取消' }
+    ).catch(() => false)
+    if (!confirmed) return
+
+    realnameLegacyClearing.value = true
+    try {
+      const result = await resetRealnameLegacyValidity('clear')
+      ElMessage.success(`已恢复 ${result.affected} 个实名主体为永久有效`)
+      loadRealnameRecords()
+    } catch {
+      ElMessage.error('撤销存量实名有效期失败')
+    } finally {
+      realnameLegacyClearing.value = false
     }
   }
 
@@ -1237,6 +1645,22 @@
   }
 
   const handleSaveRealname = async () => {
+    // 存量补算是批量改写，先确认再提交。触发条件与后端 applyRealnameLegacyBackfill 一致：
+    // 选择 backfill 且有效期 > 0，并且是首次启用或有效期取值发生变化（与生效范围无关）。
+    const willBackfill =
+      realnameForm.legacyPolicy === 'backfill' &&
+      realnameForm.validityDays > 0 &&
+      (realnameConfig.legacyPolicy !== 'backfill' ||
+        realnameConfig.validityDays !== realnameForm.validityDays)
+    if (willBackfill) {
+      const confirmed = await ElMessageBox.confirm(
+        '选择「按认证时间补算」将对现有已实名用户批量计算有效期，可能一次性产生大量待复核用户。确认继续保存吗？',
+        '存量实名处理确认',
+        { type: 'warning', confirmButtonText: '确认保存', cancelButtonText: '取消' }
+      ).catch(() => false)
+      if (!confirmed) return
+    }
+
     realnameSaving.value = true
     try {
       const data = await fetchUpdateRealnameConfig({
@@ -1246,6 +1670,7 @@
         privateKey: realnameForm.privateKey || undefined,
         alipayPublicKey: realnameForm.alipayPublicKey,
         gateway: realnameForm.gateway,
+        alipayAuthMode: realnameForm.alipayAuthMode,
         kuaitongAccessKey: realnameForm.kuaitongAccessKey,
         kuaitongSecret: realnameForm.kuaitongSecret || undefined,
         kuaitongAuthType: realnameForm.kuaitongAuthType,
@@ -1257,7 +1682,15 @@
         xiaomuAppSecret: realnameForm.xiaomuAppSecret || undefined,
         xiaomuBaseUrl: realnameForm.xiaomuBaseUrl,
         xiaomuProductMode: realnameForm.xiaomuProductMode,
-        requireAppIds: realnameForm.requireAppIds
+        requireAppIds: realnameForm.requireAppIds,
+        scope: (realnameForm.scope === 'off' ? 'by_app' : realnameForm.scope) as RealnameScope,
+        purchaseRequired: realnameForm.purchaseRequired,
+        purchaseCheckOwner: realnameForm.purchaseCheckOwner,
+        validityDays: realnameForm.validityDays,
+        graceDays: realnameForm.graceDays,
+        remindDays: realnameForm.remindDays,
+        allowIdentityChange: realnameForm.allowIdentityChange,
+        legacyPolicy: realnameForm.legacyPolicy
       })
       Object.assign(realnameConfig, { ...realnameConfig, ...data })
       realnameForm.privateKey = ''
@@ -1733,6 +2166,16 @@
         border-color: var(--el-color-warning-light-5);
       }
 
+      // 全局范围生效时应用列表不再可操作，用弱化样式表达"已自动覆盖"。
+      &.is-muted {
+        cursor: not-allowed;
+        opacity: 0.72;
+
+        &:hover {
+          border-color: var(--art-border-color);
+        }
+      }
+
       .app-info {
         flex: 1;
         min-width: 0;
@@ -1756,6 +2199,16 @@
           white-space: nowrap;
         }
       }
+    }
+
+    .impact-actions {
+      margin-top: 8px;
+    }
+
+    .unit-text {
+      margin-left: 8px;
+      font-size: 13px;
+      color: var(--art-gray-600);
     }
 
     .app-empty-state {

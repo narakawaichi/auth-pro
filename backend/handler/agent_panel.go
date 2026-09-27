@@ -1094,6 +1094,11 @@ func AgentPanelPurchase(c *gin.Context) {
 		ownerID = req.UserID
 	}
 
+	// 购买前实名门槛：代理本人需实名；为名下用户开通时按配置同时校验目标用户。
+	if realnamePurchaseBlocked(c, db, "agent", int64(agentID), ownerType, ownerID) {
+		return
+	}
+
 	var balance float64
 	err = db.QueryRow("SELECT balance FROM agents WHERE id = ? AND enabled = 1", agentID).Scan(&balance)
 	if err != nil {
