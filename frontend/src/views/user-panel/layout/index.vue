@@ -115,6 +115,9 @@
   import { useSystemConfigStore } from '@/store/modules/system-config'
   import PanelThemeToggle from '@/components/core/theme/PanelThemeToggle.vue'
 
+  const userPurchaseOrderStorageKey = 'user_panel_purchase_order'
+  const userPurchaseRefreshEvent = 'user-panel-purchase-refresh'
+
   const route = useRoute()
   const router = useRouter()
   const systemConfigStore = useSystemConfigStore()
@@ -182,23 +185,105 @@
     }
   }
 
+  let purchasePollTimer: number | null = null
+  let purchasePollRun = 0
+
+  function stopPendingPurchasePoll() {
+    purchasePollRun++
+    if (purchasePollTimer !== null) {
+      window.clearTimeout(purchasePollTimer)
+      purchasePollTimer = null
+    }
+  }
+
+  function getPendingPurchaseOrderNo() {
+    const queryOrder =
+      typeof route.query.rechargeOrder === 'string' ? route.query.rechargeOrder : ''
+    const storedOrder = sessionStorage.getItem(userPurchaseOrderStorageKey) || ''
+    const orderNo = queryOrder || storedOrder
+    return orderNo.startsWith('UP') ? orderNo : ''
+  }
+
+  function notifyPurchaseRefresh() {
+    window.dispatchEvent(new CustomEvent(userPurchaseRefreshEvent))
+  }
+
+  function recoverPendingPurchase() {
+    if (route.path === '/user/purchase' || purchasePollTimer !== null) return
+
+    const orderNo = getPendingPurchaseOrderNo()
+    if (!orderNo) return
+
+    const run = ++purchasePollRun
+    let attempts = 0
+
+    const poll = async () => {
+      if (run !== purchasePollRun) return
+      attempts++
+      try {
+        const { data } = await axios.get(
+          `/api/user-panel/purchase/orders/${encodeURIComponent(orderNo)}`,
+          { headers: { Authorization: `Bearer ${getToken()}` } }
+        )
+        const status = data.data?.status
+        if (status === 'paid') {
+          stopPendingPurchasePoll()
+          sessionStorage.removeItem(userPurchaseOrderStorageKey)
+          fetchBalance()
+          notifyPurchaseRefresh()
+          return
+        }
+        if (status === 'failed' || status === 'cancelled') {
+          stopPendingPurchasePoll()
+          sessionStorage.removeItem(userPurchaseOrderStorageKey)
+          return
+        }
+      } catch {
+        // Keep the order number so a later route change or refresh can retry.
+      }
+
+      if (run === purchasePollRun && attempts < 20) {
+        purchasePollTimer = window.setTimeout(poll, 1500)
+      } else if (run === purchasePollRun) {
+        purchasePollTimer = null
+      }
+    }
+
+    void poll()
+  }
+
   onMounted(() => {
     loadUserInfo()
     fetchBalance()
     fetchTicketUnread()
     fetchRealnameNotice()
+    recoverPendingPurchase()
     ticketUnreadTimer = setInterval(fetchTicketUnread, 30000)
     window.addEventListener('user-panel-balance-refresh', fetchBalance)
+    window.addEventListener(userPurchaseRefreshEvent, fetchBalance)
     window.addEventListener('panel-ticket-unread-refresh', fetchTicketUnread)
     window.addEventListener('user-panel-realname-refresh', fetchRealnameNotice)
   })
 
   onBeforeUnmount(() => {
     if (ticketUnreadTimer) clearInterval(ticketUnreadTimer)
+    stopPendingPurchasePoll()
     window.removeEventListener('user-panel-balance-refresh', fetchBalance)
+    window.removeEventListener(userPurchaseRefreshEvent, fetchBalance)
     window.removeEventListener('panel-ticket-unread-refresh', fetchTicketUnread)
     window.removeEventListener('user-panel-realname-refresh', fetchRealnameNotice)
   })
+
+  watch(
+    () => route.path,
+    (path) => {
+      if (path === '/user/purchase') {
+        stopPendingPurchasePoll()
+      } else {
+        recoverPendingPurchase()
+      }
+    }
+  )
 
   watch(
     selfPurchaseEnabled,

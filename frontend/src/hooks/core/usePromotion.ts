@@ -1,6 +1,5 @@
 import { RouterLink } from 'vue-router'
 import type { Component } from 'vue'
-import type { PromotionItem } from '@/api/promotion'
 
 /** 渲染广告卡片外壳所需的标签与属性；无投放链接时退化为普通容器 */
 export interface PromotionLink {
@@ -10,7 +9,7 @@ export interface PromotionLink {
 
 const isExternalUrl = (url: string) => /^https?:\/\//i.test(url)
 
-/** 广告投放项的通用行为：链接解析与无图时的渐变底色 */
+/** 广告投放项的通用行为：链接解析与统一的珍珠灰图片底色 */
 export function usePromotion() {
   /**
    * 站内地址交给路由链接，避免整页刷新；两种情况都会渲染成真实的 a 标签，
@@ -27,12 +26,9 @@ export function usePromotion() {
     return { is: RouterLink, props: { to: url } }
   }
 
-  const coverStyle = (item: PromotionItem) => {
-    const accent = item.accent
-    if (!accent) return {}
-    const fade = /^#[0-9a-f]{6}$/i.test(accent) ? `${accent}b3` : accent
-    return { background: `linear-gradient(135deg, ${accent}, ${fade})` }
-  }
+  const coverStyle = () => ({
+    background: 'linear-gradient(135deg, #f7f6f3, #e7e6e2)'
+  })
 
   return { resolvePromotionLink, coverStyle }
 }

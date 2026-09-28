@@ -52,6 +52,7 @@ import { fetchGetUserInfo } from '@/api/auth'
 import { ApiStatus } from '@/utils/http/status'
 import { isHttpError } from '@/utils/http/error'
 import { RouteRegistry, MenuProcessor, IframeRouteManager, RoutePermissionValidator } from '../core'
+import { normalizeAdminLoginRedirect } from '@/utils/router/loginRedirect'
 
 // 路由注册器实例
 let routeRegistry: RouteRegistry | null = null
@@ -249,6 +250,19 @@ async function handleRouteGuard(
     return
   }
 
+  // 访问管理员登录页时，清理无效或嵌套的 redirect，避免刷新后继续保留脏 URL。
+  if (to.path === RoutesAlias.Login && Object.prototype.hasOwnProperty.call(to.query, 'redirect')) {
+    const redirect = normalizeAdminLoginRedirect(to.query.redirect)
+    if (redirect !== to.query.redirect) {
+      next({
+        path: RoutesAlias.Login,
+        query: redirect ? { redirect } : undefined,
+        replace: true
+      })
+      return
+    }
+  }
+
   // 访问管理员登录页时，若本地残留登录状态（旧 token / 损坏的用户数据），
   // 直接清理后放行登录页，避免带着无效凭证发起动态路由初始化（此时会出现“查询用户失败”）。
   if (to.path === RoutesAlias.Login && userStore.isLogin) {
@@ -320,11 +334,12 @@ function handleLoginStatus(
     return true
   }
 
-  // 未登录且访问需要权限的页面，跳转到登录页并携带 redirect 参数
+  // 未登录且访问需要权限的页面，跳转到登录页并携带合法 redirect 参数
+  const redirect = normalizeAdminLoginRedirect(to.fullPath)
   userStore.logOut()
   next({
     name: 'Login',
-    query: { redirect: to.fullPath }
+    query: redirect ? { redirect } : undefined
   })
   return false
 }

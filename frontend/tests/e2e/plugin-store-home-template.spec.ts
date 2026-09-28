@@ -277,6 +277,12 @@ test('后台登录忽略根路径回跳并进入管理控制台', async ({ page 
   await expect(page).toHaveURL(/\/dashboard\/console$/, { timeout: 15_000 })
 })
 
+test('管理员登录页清理嵌套回跳参数', async ({ page }) => {
+  await mockAdminAndTemplateAPIs(page)
+  await page.goto('/admin?redirect=%2Fadmin%3Fredirect%3D%2F')
+  await expect(page).toHaveURL('http://127.0.0.1:4175/admin')
+})
+
 test('后台登录允许返回独立应用商店子路由', async ({ page }) => {
   await mockAdminAndTemplateAPIs(page)
   await page.route('**/admin/app-store/templates', async (route) => {

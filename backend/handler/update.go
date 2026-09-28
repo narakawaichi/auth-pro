@@ -1442,6 +1442,20 @@ finish_job() {
   mv -f "$JOB_RESULT.tmp" "$JOB_RESULT"
 }
 
+start_systemd_service() {
+  # systemctl start 不会继承更新脚本的环境变量；显式把当前数据目录
+  # 注入 systemd manager，避免重启后服务读取另一份 db.json。
+  if ! systemctl set-environment "AUTO_PRO_DATA_DIR=$DATA_DIR" "PORT=$PORT"; then
+    return 1
+  fi
+  if systemctl start "$SERVICE_NAME"; then
+    systemctl unset-environment AUTO_PRO_DATA_DIR PORT >/dev/null 2>&1 || true
+    return 0
+  fi
+  systemctl unset-environment AUTO_PRO_DATA_DIR PORT >/dev/null 2>&1 || true
+  return 1
+}
+
 sleep 2
 TS=$(date '+%%Y%%m%%d%%H%%M%%S')
 USE_SYSTEMD=0
@@ -1565,7 +1579,7 @@ fi
 
 if ! mv -f "$APP_STAGE" "$APP_BIN"; then
   if [ "$USE_SYSTEMD" = "1" ]; then
-    systemctl start "$SERVICE_NAME" >/dev/null 2>&1 || true
+    start_systemd_service >/dev/null 2>&1 || true
   else
     cd "$DATA_DIR" || exit 1
     AUTO_PRO_DATA_DIR="$DATA_DIR" PORT="$PORT" nohup "$APP_BIN" >> "$DATA_DIR/logs/auto_pro.log" 2>&1 &
@@ -1577,7 +1591,7 @@ fi
 chmod 755 "$APP_BIN"
 
 if [ "$USE_SYSTEMD" = "1" ]; then
-  systemctl start "$SERVICE_NAME" >/dev/null 2>&1 || true
+  start_systemd_service >/dev/null 2>&1 || true
 else
   mkdir -p "$DATA_DIR/logs"
   cd "$DATA_DIR" || exit 1

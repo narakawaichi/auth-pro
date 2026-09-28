@@ -24,7 +24,7 @@
           :class="{ 'is-clickable': !!card.item.linkUrl }"
           :style="{ width: cardWidth }"
         >
-          <div class="marquee-cover" :style="coverStyle(card.item)">
+          <div class="marquee-cover" :style="coverStyle()">
             <img v-if="card.item.imageUrl" :src="card.item.imageUrl" :alt="card.item.title" />
             <span v-else>{{ card.item.title.charAt(0) }}</span>
           </div>
@@ -164,8 +164,8 @@
       cursor: pointer;
 
       &:hover {
-        border-color: rgba(var(--art-primary-rgb), 0.24);
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+        border-color: transparent;
+        box-shadow: 0 6px 16px rgb(0 0 0 / 6%);
       }
     }
   }
@@ -188,7 +188,7 @@
     span {
       font-size: 22px;
       font-weight: 700;
-      color: rgba(255, 255, 255, 0.92);
+      color: var(--art-gray-700);
     }
   }
 

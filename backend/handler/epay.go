@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -1320,14 +1321,55 @@ func loadRechargeReturnURL(orderNo string) string {
 
 func buildRequestURL(c *gin.Context, routePath string) string {
 	scheme := "http"
-	if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
+	if c.Request.TLS != nil || strings.EqualFold(firstForwardedValue(c.GetHeader("X-Forwarded-Proto")), "https") {
 		scheme = "https"
 	}
-	host := c.GetHeader("X-Forwarded-Host")
+
+	// 反向代理可能把公网端口直接放在 X-Forwarded-Host，也可能拆到
+	// X-Forwarded-Port；优先保留 Host 已有端口，否则补充单独转发的端口。
+	host := firstForwardedValue(c.GetHeader("X-Forwarded-Host"))
 	if host == "" {
 		host = c.Request.Host
 	}
+	host = appendForwardedPort(host, firstForwardedValue(c.GetHeader("X-Forwarded-Port")))
 	return scheme + "://" + host + routePath
+}
+
+// firstForwardedValue 取逗号分隔代理链的第一项；部署时应由可信代理覆盖转发头。
+func firstForwardedValue(value string) string {
+	if index := strings.IndexByte(value, ','); index >= 0 {
+		value = value[:index]
+	}
+	return strings.TrimSpace(value)
+}
+
+// appendForwardedPort 为无端口的 Host 补充有效转发端口，并为裸 IPv6 添加 URL 所需的方括号。
+func appendForwardedPort(host, port string) string {
+	host = strings.TrimSpace(host)
+	port = strings.TrimSpace(port)
+	if host == "" {
+		return host
+	}
+	if strings.Contains(host, ":") && net.ParseIP(host) != nil {
+		host = "[" + host + "]"
+	}
+	if _, _, err := net.SplitHostPort(host); err == nil {
+		return host
+	}
+
+	// ParseUint 拒绝符号、非数字和越界值，避免拼出 :+8443 等无效端口。
+	portNumber, err := strconv.ParseUint(port, 10, 16)
+	if err != nil || portNumber == 0 {
+		return host
+	}
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return net.JoinHostPort(host[1:len(host)-1], port)
+	}
+	if strings.Contains(host, ":") {
+		// 对无法解析的 host:port 保持原值，避免重复拼接。
+		return host
+	}
+	return net.JoinHostPort(host, port)
 }
 
 func buildFrontendReturnURL(c *gin.Context, orderNo string, returnPath string) string {

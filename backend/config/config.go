@@ -113,19 +113,35 @@ func getDataDir() string {
 		return dir
 	}
 
-	if cwd, err := os.Getwd(); err == nil {
-		candidates := []string{cwd, filepath.Join(cwd, "backend")}
-		for _, dir := range candidates {
-			if fileExists(filepath.Join(dir, "install.lock")) || fileExists(filepath.Join(dir, "db.json")) || fileExists(filepath.Join(dir, "go.mod")) {
-				return dir
-			}
+	cwd, _ := os.Getwd()
+	executable, _ := os.Executable()
+	return resolveDataDir(cwd, executable)
+}
+
+// resolveDataDir 在未显式配置 AUTO_PRO_DATA_DIR 时确定运行数据目录。
+// 生产环境通常由 systemd 启动，进程工作目录可能是 / 或 unit 中的其他目录；
+// 优先检查可执行文件所在目录可以避免在线更新重启后读取另一份 db.json。
+func resolveDataDir(cwd string, executable string) string {
+	candidates := make([]string, 0, 3)
+	if executable != "" {
+		candidates = append(candidates, filepath.Dir(executable))
+	}
+	if cwd != "" {
+		candidates = append(candidates, cwd, filepath.Join(cwd, "backend"))
+	}
+
+	for _, dir := range candidates {
+		if fileExists(filepath.Join(dir, "install.lock")) || fileExists(filepath.Join(dir, "db.json")) || fileExists(filepath.Join(dir, "go.mod")) {
+			return dir
 		}
 	}
 
-	if exe, err := os.Executable(); err == nil {
-		return filepath.Dir(exe)
+	if executable != "" {
+		return filepath.Dir(executable)
 	}
-
+	if cwd != "" {
+		return cwd
+	}
 	return "."
 }
 

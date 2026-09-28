@@ -293,12 +293,13 @@
 </template>
 
 <script setup lang="ts">
-  import { ref, reactive, onMounted, computed } from 'vue'
+  import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
   import { ElMessage, ElMessageBox } from 'element-plus'
   import { Icon as IconifyIcon } from '@iconify/vue'
   import axios from 'axios'
   import LicenseVersionsDialog from '@/components/core/panels/LicenseVersionsDialog.vue'
 
+  const purchaseRefreshEvent = 'user-panel-purchase-refresh'
   const loading = ref(false)
   const searchForm = reactive({ keyword: '', appId: '', status: '' })
   const pagination = reactive({ page: 1, pageSize: 10, total: 0 })
@@ -411,6 +412,10 @@
     } finally {
       loading.value = false
     }
+  }
+
+  function handlePurchaseRefresh() {
+    fetchList()
   }
 
   function handleSearch() {
@@ -604,6 +609,11 @@
   onMounted(() => {
     fetchApps()
     fetchList()
+    window.addEventListener(purchaseRefreshEvent, handlePurchaseRefresh)
+  })
+
+  onBeforeUnmount(() => {
+    window.removeEventListener(purchaseRefreshEvent, handlePurchaseRefresh)
   })
 </script>
 

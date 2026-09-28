@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -10,8 +11,8 @@ import (
 	"auto_pro/middleware"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -50,6 +51,7 @@ func Login(c *gin.Context) {
 	var roleID sql.NullInt64
 	err = db.QueryRow("SELECT id, password_hash, role_id FROM admins WHERE username = ? AND enabled = 1", req.UserName).Scan(&id, &passwordHash, &roleID)
 	if err != nil {
+		log.Printf("[auth] administrator lookup failed: username=%q err=%v data_dir=%q", req.UserName, err, config.GetDataDir())
 		middleware.RecordLoginFailure(c.ClientIP(), req.UserName)
 		c.JSON(http.StatusOK, gin.H{"code": 401, "message": "账号或密码错误"})
 		return
@@ -61,6 +63,7 @@ func Login(c *gin.Context) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)); err != nil {
+		log.Printf("[auth] administrator password mismatch: username=%q admin_id=%d data_dir=%q", req.UserName, id, config.GetDataDir())
 		middleware.RecordLoginFailure(c.ClientIP(), req.UserName)
 		c.JSON(http.StatusOK, gin.H{"code": 401, "message": "账号或密码错误"})
 		return

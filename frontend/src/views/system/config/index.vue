@@ -361,7 +361,7 @@
           </ElTabPane>
 
           <ElTabPane label="实名认证" name="realname">
-            <section class="section-card">
+            <section class="section-card realname-settings-section">
               <div class="section-title">
                 <div>
                   <strong>实名认证</strong>
@@ -427,7 +427,7 @@
               <ElRow :gutter="24" class="realname-body">
                 <!-- 左：接口配置 -->
                 <ElCol :xs="24" :lg="14">
-                  <div class="config-block">
+                  <div class="config-block provider-config-block">
                     <div class="block-header">
                       <span class="block-num">1</span>
                       <div>
@@ -473,7 +473,7 @@
 
                   <div
                     v-if="realnameConfig.pluginEnabled && realnameForm.provider === 'kuaitong'"
-                    class="config-block"
+                    class="config-block credentials-config-block"
                   >
                     <div class="block-header">
                       <span class="block-num">2</span>
@@ -549,7 +549,7 @@
 
                   <div
                     v-else-if="realnameConfig.pluginEnabled && realnameForm.provider === 'tencent'"
-                    class="config-block"
+                    class="config-block credentials-config-block"
                   >
                     <div class="block-header">
                       <span class="block-num">2</span>
@@ -643,7 +643,7 @@
 
                   <div
                     v-else-if="realnameConfig.pluginEnabled && realnameForm.provider === 'xiaomu'"
-                    class="config-block"
+                    class="config-block credentials-config-block"
                   >
                     <div class="block-header">
                       <span class="block-num">2</span>
@@ -725,7 +725,10 @@
                     </ElFormItem>
                   </div>
 
-                  <div v-else-if="realnameConfig.pluginEnabled" class="config-block">
+                  <div
+                    v-else-if="realnameConfig.pluginEnabled"
+                    class="config-block credentials-config-block"
+                  >
                     <div class="block-header">
                       <span class="block-num">2</span>
                       <div>
@@ -827,8 +830,8 @@
                   </div>
                 </ElCol>
 
-                <!-- 右：接入说明 + 应用范围 -->
-                <ElCol :xs="24" :lg="10">
+                <!-- 右：接入说明 + 购买门槛 + 应用范围 -->
+                <ElCol class="realname-side-column" :xs="24" :lg="10">
                   <div class="config-block help-block">
                     <div class="block-header">
                       <ArtSvgIcon icon="ri:information-line" class="help-icon" />
@@ -880,15 +883,10 @@
                       <li>管理员后台直接创建的授权不受实名限制</li>
                     </ul>
                   </div>
-                </ElCol>
-              </ElRow>
 
-              <!-- 购买门槛 + 有效期设置 -->
-              <ElRow :gutter="24" class="realname-body">
-                <ElCol :xs="24" :lg="14">
-                  <div class="config-block">
+                  <div class="config-block purchase-config-block">
                     <div class="block-header">
-                      <span class="block-num">2</span>
+                      <span class="block-num">3</span>
                       <div>
                         <strong>购买前实名门槛</strong>
                         <span>开启后，购买或开通授权前需要先完成实名</span>
@@ -923,9 +921,92 @@
                     </ElFormItem>
                   </div>
 
-                  <div class="config-block">
+                  <div class="config-block app-scope-config-block">
                     <div class="block-header">
-                      <span class="block-num">3</span>
+                      <span class="block-num">5</span>
+                      <div>
+                        <strong>实名应用范围</strong>
+                        <span v-if="realnameForm.scope === 'all'">
+                          全部应用强制实名，应用列表已不生效
+                        </span>
+                        <span v-else>勾选的应用将强制要求用户完成实名</span>
+                      </div>
+                      <ElText class="block-count" type="info" size="small">
+                        已选 {{ realnameForm.requireAppIds.length }} /
+                        {{ realnameConfig.apps.length }}
+                      </ElText>
+                    </div>
+
+                    <ElAlert
+                      v-if="realnameForm.scope === 'all'"
+                      type="info"
+                      :closable="false"
+                      title="当前为全部应用强制实名"
+                      description="所有应用（含今后新增）都会要求实名，无需再逐个勾选"
+                      class="mb-3"
+                    />
+
+                    <div
+                      v-if="realnameConfig.apps.length"
+                      class="app-select-list"
+                      :class="{ 'is-disabled': realnameForm.scope === 'all' }"
+                    >
+                      <div
+                        v-for="app in realnameConfig.apps"
+                        :key="app.id"
+                        class="app-select-item"
+                        :class="{
+                          'is-checked':
+                            realnameForm.scope !== 'all' &&
+                            realnameForm.requireAppIds.includes(app.id),
+                          'is-muted': realnameForm.scope === 'all'
+                        }"
+                        @click="handleToggleRequireApp(app.id)"
+                      >
+                        <ElCheckbox
+                          :model-value="
+                            realnameForm.scope === 'all' ||
+                            realnameForm.requireAppIds.includes(app.id)
+                          "
+                          :disabled="realnameForm.scope === 'all'"
+                          @click.stop
+                          @change="() => handleToggleRequireApp(app.id)"
+                        />
+                        <div class="app-info">
+                          <strong>{{ app.appName }}</strong>
+                          <span>{{ app.appKey }}</span>
+                        </div>
+                        <ElTag
+                          v-if="realnameForm.scope === 'all'"
+                          type="success"
+                          size="small"
+                          effect="light"
+                          >全局生效</ElTag
+                        >
+                        <ElTag
+                          v-else-if="realnameForm.requireAppIds.includes(app.id)"
+                          type="warning"
+                          size="small"
+                          effect="light"
+                          >需实名</ElTag
+                        >
+                      </div>
+                    </div>
+                    <div v-else class="app-empty-state">
+                      <ArtSvgIcon icon="ri:inbox-line" />
+                      <p>暂无应用</p>
+                      <ElText type="info" size="small">请先在应用管理中创建应用</ElText>
+                    </div>
+                  </div>
+                </ElCol>
+              </ElRow>
+
+              <!-- 有效期设置 -->
+              <ElRow :gutter="24" class="realname-body">
+                <ElCol :xs="24" :lg="14">
+                  <div class="config-block validity-config-block">
+                    <div class="block-header">
+                      <span class="block-num">4</span>
                       <div>
                         <strong>实名有效期与复核</strong>
                         <span>到期后需重新认证，可在宽限期内继续使用</span>
@@ -1018,86 +1099,6 @@
                         撤销补算，全部恢复永久有效
                       </ElButton>
                     </ElFormItem>
-                  </div>
-                </ElCol>
-
-                <ElCol :xs="24" :lg="10">
-                  <div class="config-block">
-                    <div class="block-header">
-                      <span class="block-num">4</span>
-                      <div>
-                        <strong>实名应用范围</strong>
-                        <span v-if="realnameForm.scope === 'all'">
-                          全部应用强制实名，应用列表已不生效
-                        </span>
-                        <span v-else>勾选的应用将强制要求用户完成实名</span>
-                      </div>
-                      <ElText class="block-count" type="info" size="small">
-                        已选 {{ realnameForm.requireAppIds.length }} /
-                        {{ realnameConfig.apps.length }}
-                      </ElText>
-                    </div>
-
-                    <ElAlert
-                      v-if="realnameForm.scope === 'all'"
-                      type="info"
-                      :closable="false"
-                      title="当前为全部应用强制实名"
-                      description="所有应用（含今后新增）都会要求实名，无需再逐个勾选"
-                      class="mb-3"
-                    />
-
-                    <div
-                      v-if="realnameConfig.apps.length"
-                      class="app-select-list"
-                      :class="{ 'is-disabled': realnameForm.scope === 'all' }"
-                    >
-                      <div
-                        v-for="app in realnameConfig.apps"
-                        :key="app.id"
-                        class="app-select-item"
-                        :class="{
-                          'is-checked':
-                            realnameForm.scope !== 'all' &&
-                            realnameForm.requireAppIds.includes(app.id),
-                          'is-muted': realnameForm.scope === 'all'
-                        }"
-                        @click="handleToggleRequireApp(app.id)"
-                      >
-                        <ElCheckbox
-                          :model-value="
-                            realnameForm.scope === 'all' ||
-                            realnameForm.requireAppIds.includes(app.id)
-                          "
-                          :disabled="realnameForm.scope === 'all'"
-                          @click.stop
-                          @change="() => handleToggleRequireApp(app.id)"
-                        />
-                        <div class="app-info">
-                          <strong>{{ app.appName }}</strong>
-                          <span>{{ app.appKey }}</span>
-                        </div>
-                        <ElTag
-                          v-if="realnameForm.scope === 'all'"
-                          type="success"
-                          size="small"
-                          effect="light"
-                          >全局生效</ElTag
-                        >
-                        <ElTag
-                          v-else-if="realnameForm.requireAppIds.includes(app.id)"
-                          type="warning"
-                          size="small"
-                          effect="light"
-                          >需实名</ElTag
-                        >
-                      </div>
-                    </div>
-                    <div v-else class="app-empty-state">
-                      <ArtSvgIcon icon="ri:inbox-line" />
-                      <p>暂无应用</p>
-                      <ElText type="info" size="small">请先在应用管理中创建应用</ElText>
-                    </div>
                   </div>
                 </ElCol>
               </ElRow>
@@ -1966,8 +1967,23 @@
       }
     }
 
+    .realname-settings-section {
+      display: block;
+    }
+
     .realname-body {
       margin-bottom: 8px;
+    }
+
+    .realname-side-column {
+      display: flex;
+      flex-direction: column;
+      align-self: flex-start;
+      gap: 12px;
+
+      > .config-block {
+        margin-bottom: 0;
+      }
     }
 
     .config-block {
@@ -2428,6 +2444,19 @@
     }
 
     @media (max-width: 991px) {
+      .realname-settings-section {
+        display: block;
+
+        .realname-body {
+          display: block;
+          margin-bottom: 8px;
+        }
+
+        .realname-body .realname-side-column {
+          display: flex !important;
+        }
+      }
+
       .preview-panel {
         position: static;
       }

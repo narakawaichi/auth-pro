@@ -139,6 +139,40 @@ func TestGetUpdateManifestURL(t *testing.T) {
 	}
 }
 
+func TestResolveDataDirPrefersExecutableDirectory(t *testing.T) {
+	root := t.TempDir()
+	executableDir := filepath.Join(root, "release", "backend")
+	cwd := filepath.Join(root, "working")
+	if err := os.MkdirAll(executableDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cwd, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(executableDir, "db.json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := resolveDataDir(cwd, filepath.Join(executableDir, "auth_pro")); got != executableDir {
+		t.Fatalf("resolveDataDir() = %q, want %q", got, executableDir)
+	}
+}
+
+func TestResolveDataDirFallsBackToWorkingDirectory(t *testing.T) {
+	root := t.TempDir()
+	cwd := filepath.Join(root, "working")
+	if err := os.MkdirAll(cwd, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "install.lock"), []byte("installed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := resolveDataDir(cwd, filepath.Join(root, "missing", "auth_pro")); got != cwd {
+		t.Fatalf("resolveDataDir() = %q, want %q", got, cwd)
+	}
+}
+
 func TestGetFrontendDirOverride(t *testing.T) {
 	frontendDir := t.TempDir()
 	t.Setenv("AUTO_PRO_FRONTEND_DIR", frontendDir)

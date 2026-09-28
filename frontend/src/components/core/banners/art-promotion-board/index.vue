@@ -26,7 +26,7 @@
               class="promotion-item"
               :class="{ 'is-clickable': !!cell.item.linkUrl }"
             >
-              <div class="promotion-cover" :style="coverStyle(cell.item)">
+              <div class="promotion-cover" :style="coverStyle()">
                 <img v-if="cell.item.imageUrl" :src="cell.item.imageUrl" :alt="cell.item.title" />
                 <span v-else>{{ cell.item.title.charAt(0) }}</span>
               </div>
@@ -212,8 +212,8 @@
       cursor: pointer;
 
       &:hover {
-        border-color: rgba(var(--art-primary-rgb), 0.24);
-        box-shadow: 0 6px 16px rgb(0 0 0 / 8%);
+        border-color: transparent;
+        box-shadow: 0 6px 16px rgb(0 0 0 / 6%);
         transform: translateY(-2px);
       }
     }
@@ -237,7 +237,7 @@
     span {
       font-size: 20px;
       font-weight: 700;
-      color: rgb(255 255 255 / 92%);
+      color: var(--art-gray-700);
     }
   }
 

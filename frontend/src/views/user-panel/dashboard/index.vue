@@ -87,12 +87,13 @@
 </template>
 
 <script setup lang="ts">
-  import { reactive, ref, onMounted } from 'vue'
+  import { reactive, ref, onMounted, onBeforeUnmount } from 'vue'
   import { ElMessage } from 'element-plus'
   import { Icon as IconifyIcon } from '@iconify/vue'
   import axios from 'axios'
   import { useRoute, useRouter } from 'vue-router'
 
+  const purchaseRefreshEvent = 'user-panel-purchase-refresh'
   const route = useRoute()
   const router = useRouter()
 
@@ -141,7 +142,7 @@
     const queryOrder =
       typeof route.query.rechargeOrder === 'string' ? route.query.rechargeOrder : ''
     const orderNo = queryOrder || sessionStorage.getItem(rechargeOrderStorageKey) || ''
-    if (!orderNo) return
+    if (!orderNo.startsWith('UR')) return
 
     sessionStorage.removeItem(rechargeOrderStorageKey)
     const nextQuery = { ...route.query }
@@ -171,9 +172,19 @@
     }, 1500)
   }
 
+  function handlePurchaseRefresh() {
+    fetchDashboard()
+  }
+
   onMounted(() => {
     fetchDashboard()
     checkRechargeReturn()
+    window.addEventListener(purchaseRefreshEvent, handlePurchaseRefresh)
+  })
+
+  onBeforeUnmount(() => {
+    stopRechargePoll()
+    window.removeEventListener(purchaseRefreshEvent, handlePurchaseRefresh)
   })
 </script>
 

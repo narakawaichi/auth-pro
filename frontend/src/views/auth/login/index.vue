@@ -74,6 +74,7 @@
   import { fetchLogin } from '@/api/auth'
   import { ElMessage, ElNotification, type FormInstance, type FormRules } from 'element-plus'
   import { useGeetestLoginCaptcha } from '@/utils/geetest'
+  import { isAdminAppStorePath, normalizeAdminLoginRedirect } from '@/utils/router/loginRedirect'
 
   defineOptions({ name: 'Login' })
 
@@ -115,31 +116,8 @@
 
   const loading = ref(false)
 
-  const isAppStorePath = (path: string) =>
-    path === '/admin/app-store' || path.startsWith('/admin/app-store/')
-
-  const resolveLoginRedirect = () => {
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect.trim() : ''
-    if (!redirect.startsWith('/') || redirect.startsWith('//')) return '/dashboard/console'
-
-    const targetPath = redirect.split(/[?#]/, 1)[0]
-    const isAppStoreRedirect = isAppStorePath(targetPath)
-    if (
-      targetPath === '/' ||
-      targetPath === '/install' ||
-      targetPath.startsWith('/install/') ||
-      targetPath === '/admin' ||
-      (targetPath.startsWith('/admin/') && !isAppStoreRedirect) ||
-      targetPath === '/user' ||
-      targetPath.startsWith('/user/') ||
-      targetPath === '/agent-panel' ||
-      targetPath.startsWith('/agent-panel/')
-    ) {
-      return '/dashboard/console'
-    }
-
-    return redirect
-  }
+  const resolveLoginRedirect = () =>
+    normalizeAdminLoginRedirect(route.query.redirect) || '/dashboard/console'
 
   // 登录
   const handleSubmit = async () => {
@@ -191,7 +169,7 @@
 
       // 独立应用商店需要重新请求 Go 静态入口，不能交给主后台 Router 接管。
       const redirectTarget = resolveLoginRedirect()
-      if (isAppStorePath(redirectTarget.split(/[?#]/, 1)[0])) {
+      if (isAdminAppStorePath(redirectTarget.split(/[?#]/, 1)[0])) {
         loginCompleted = true
         window.location.replace(redirectTarget)
         return

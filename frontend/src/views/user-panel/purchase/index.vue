@@ -849,7 +849,7 @@
       typeof route.query.rechargeOrder === 'string' ? route.query.rechargeOrder : ''
     const storedOrderNo = sessionStorage.getItem(rechargeOrderStorageKey) || ''
     const orderNo = queryOrderNo || storedOrderNo
-    if (!orderNo || orderNo.startsWith('LP')) return
+    if (!orderNo || !orderNo.startsWith('UR')) return
 
     const paid = await pollRechargeOrder(orderNo)
     if (paid) {

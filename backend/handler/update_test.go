@@ -387,6 +387,8 @@ func TestWriteOnlineUpdateScriptSupportsWebsiteRoot(t *testing.T) {
 		`FRONTEND_MODE="inplace"`,
 		`cp -a "$FRONTEND_SOURCE/assets/." "$FRONTEND_ROOT/assets/"`,
 		`mv -f "$APP_STAGE" "$APP_BIN"`,
+		`start_systemd_service()`,
+		`systemctl set-environment "AUTO_PRO_DATA_DIR=$DATA_DIR" "PORT=$PORT"`,
 		`finish_job success`,
 		`rollback_frontend`,
 	} {
