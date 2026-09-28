@@ -1,5 +1,20 @@
 <template>
   <div class="agent-purchase">
+    <!-- 购买前实名门槛提示：后端会在下单时再次校验，这里只做前置引导 -->
+    <el-alert
+      v-if="realnameGateVisible"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="realname-gate-alert"
+    >
+      <template #title>{{ realnameGateTitle }}</template>
+      <div class="realname-gate-body">
+        <span>{{ realnameGateDesc }}</span>
+        <el-button type="primary" size="small" @click="goRealname">去完成实名</el-button>
+      </div>
+    </el-alert>
+
     <div class="steps-bar">
       <template v-for="(item, index) in stepItems" :key="item.value">
         <div
@@ -621,9 +636,61 @@
   onMounted(() => {
     fetchApps()
     fetchBalance()
+    fetchRealnameGate()
     payMethod.value = 'balance'
     checkPurchaseReturn()
   })
+
+  // 购买前实名门槛：代理本人或（配置开启时的）目标用户未实名都会拦截。
+  const realnameVerified = ref(false)
+  const realnameStatus = ref('ok')
+  const purchaseRealnameRequired = ref(false)
+  const purchaseCheckOwner = ref(true)
+  const agentRealnameBlocked = computed(
+    () => purchaseRealnameRequired.value && !realnameVerified.value
+  )
+  // 目标用户提示只在后端真的会校验目标用户（purchaseCheckOwner 开启）时展示。
+  const realnameGateVisible = computed(
+    () =>
+      agentRealnameBlocked.value ||
+      (purchaseRealnameRequired.value && purchaseCheckOwner.value && !!formData.userId)
+  )
+  const realnameGateTitle = computed(() => {
+    if (agentRealnameBlocked.value) {
+      return realnameStatus.value === 'expired' ? '实名信息已过期' : '购买前需完成实名认证'
+    }
+    return '请确认目标用户已完成实名'
+  })
+  const realnameGateDesc = computed(() => {
+    if (agentRealnameBlocked.value) {
+      return realnameStatus.value === 'expired'
+        ? '您的实名有效期已过，重新认证后才能继续开通授权。'
+        : '本站在开通授权前要求代理商完成实名认证。'
+    }
+    return '当前配置要求目标用户也完成实名，否则下单会被拦截。'
+  })
+
+  function goRealname() {
+    if (agentRealnameBlocked.value) {
+      router.push('/agent-panel/profile')
+      return
+    }
+    ElMessage.info('请提醒目标用户登录用户中心完成实名认证')
+  }
+
+  async function fetchRealnameGate() {
+    try {
+      const { data } = await axios.get('/api/agent-panel/profile', { headers: authHeaders.value })
+      if (data.code === 200) {
+        realnameVerified.value = !!data.data?.realnameVerified
+        realnameStatus.value = data.data?.realnameStatus || 'ok'
+        purchaseRealnameRequired.value = !!data.data?.purchaseRealnameRequired
+        purchaseCheckOwner.value = data.data?.purchaseCheckOwner !== false
+      }
+    } catch {
+      // 拉取失败不阻断页面，提交时后端仍会校验
+    }
+  }
 
   const typeOptionCatalog = [
     { value: 'domain', label: '单域名', icon: 'ri:global-line' },
@@ -964,6 +1031,18 @@
   .agent-purchase {
     max-width: 960px;
     margin: 0 auto;
+  }
+
+  .realname-gate-alert {
+    margin-bottom: 8px;
+
+    .realname-gate-body {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 6px;
+    }
   }
 
   .steps-bar {

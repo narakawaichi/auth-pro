@@ -111,6 +111,15 @@
                     />
                   </ElFormItem>
                 </ElCol>
+                <ElCol :xs="24" :md="8">
+                  <ElFormItem label="实名到期邮件">
+                    <ElSwitch
+                      v-model="form.enabledRealnameExpire"
+                      active-text="启用"
+                      inactive-text="关闭"
+                    />
+                  </ElFormItem>
+                </ElCol>
                 <ElCol :xs="24">
                   <ElFormItem label="提前提醒天数" prop="expireRemindDays">
                     <ElSelect
@@ -341,6 +350,79 @@
                     </div>
                   </div>
                 </ElTabPane>
+                <ElTabPane label="实名到期" name="realname">
+                  <div class="template-editor">
+                    <ElFormItem label="邮件标题" prop="realnameExpireSubject">
+                      <ElInput v-model="form.realnameExpireSubject" />
+                    </ElFormItem>
+                    <ElFormItem label="内容类型" class="content-type-form-item">
+                      <ElRadioGroup
+                        v-model="form.realnameExpireContentType"
+                        class="content-type-selector"
+                        :disabled="contentTypeSaving !== null"
+                        @change="handleContentTypeChange('realname')"
+                      >
+                        <ElRadioButton label="text">
+                          <span class="content-type-option">
+                            <span class="content-type-icon">TXT</span>
+                            <span>
+                              <strong>普通文本</strong>
+                              <small>纯文字内容，兼容性更好</small>
+                            </span>
+                          </span>
+                        </ElRadioButton>
+                        <ElRadioButton label="html">
+                          <span class="content-type-option">
+                            <span class="content-type-icon">&lt;/&gt;</span>
+                            <span>
+                              <strong>HTML 源码</strong>
+                              <small>使用排版模板展示邮件</small>
+                            </span>
+                          </span>
+                        </ElRadioButton>
+                      </ElRadioGroup>
+                      <div
+                        class="content-type-status"
+                        :class="{ 'is-saving': contentTypeSaving === 'realname' }"
+                      >
+                        {{
+                          contentTypeSaving === 'realname'
+                            ? '正在应用并自动保存…'
+                            : '选择后自动保存，HTML 源码会自动载入默认模板'
+                        }}
+                      </div>
+                    </ElFormItem>
+                    <div class="editor-toolbar">
+                      <ElTag
+                        v-for="item in realnameVariables"
+                        :key="item.key"
+                        effect="plain"
+                        @click="appendTemplateVariable('realname', item.key)"
+                      >
+                        {{ item.key }}
+                      </ElTag>
+                    </div>
+                    <ElFormItem label="自定义邮件内容" prop="realnameExpireContent">
+                      <ElInput v-model="form.realnameExpireContent" type="textarea" :rows="12" />
+                    </ElFormItem>
+                    <ElAlert
+                      type="info"
+                      :closable="false"
+                      show-icon
+                      title="提醒时间由系统设置「实名认证」中的到期前提醒天数控制，此处只维护邮件内容"
+                      class="template-alert"
+                    />
+                    <div class="preview-box">
+                      <div class="preview-title">预览</div>
+                      <div
+                        class="preview-content"
+                        v-html="
+                          renderPreview(form.realnameExpireContent, form.realnameExpireContentType)
+                        "
+                      ></div>
+                    </div>
+                  </div>
+                </ElTabPane>
               </ElTabs>
             </div>
           </ElCol>
@@ -414,9 +496,9 @@
   const remindDayList = ref<string[]>(['7', '3', '1'])
   const defaultRemindDays = [30, 15, 7, 3, 1]
 
-  type MailTemplateType = 'purchase' | 'expire' | 'opened'
+  type MailTemplateType = 'purchase' | 'expire' | 'opened' | 'realname'
 
-  const mailTemplateTypes: MailTemplateType[] = ['purchase', 'expire', 'opened']
+  const mailTemplateTypes: MailTemplateType[] = ['purchase', 'expire', 'opened', 'realname']
 
   const form = reactive<MailConfigData>({
     provider: 'qq',
@@ -431,6 +513,7 @@
     enabledPurchaseSuccess: true,
     enabledExpireReminder: true,
     enabledLicenseOpened: true,
+    enabledRealnameExpire: true,
     expireRemindDays: '7,3,1',
     purchaseSubject: '{{appName}} 开通成功通知',
     purchaseContent:
@@ -443,7 +526,11 @@
     openedSubject: '{{appName}} 授权开通通知',
     openedContent:
       '您好，{{ownerName}}：\n\n管理员已为您开通应用 {{appName}} 的授权。\n\n开通时间：{{openedAt}}\n到期时间：{{expiresAt}}\n授权码：{{licenseKey}}\n\n请妥善保存相关信息。',
-    openedContentType: 'text'
+    openedContentType: 'text',
+    realnameExpireSubject: '实名认证即将过期提醒',
+    realnameExpireContent:
+      '您好，{{ownerName}}：\n\n您的实名认证信息将于 {{expiresAt}} 过期，剩余 {{daysLeft}} 天。\n\n过期后需要重新认证，否则将影响应用授权安装与购买。\n\n请及时前往个人中心完成重新认证。',
+    realnameExpireContentType: 'text'
   })
 
   const defaultHtmlTemplates: Record<MailTemplateType, string> = {
@@ -520,13 +607,39 @@
     </tr>
     <tr><td style="padding:20px 36px;background:#f8fafc;text-align:center;font-size:12px;color:#94a3b8;">此邮件由 {{siteName}} 自动发送，请勿直接回复。</td></tr>
   </table>
+</div>`,
+    realname: `<div style="margin:0;padding:32px 16px;background:#fff1f2;font-family:Arial,'Microsoft YaHei',sans-serif;color:#1f2937;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(159,18,57,.10);">
+    <tr>
+      <td style="padding:30px 36px;background:#e11d48;color:#ffffff;">
+        <div style="font-size:14px;opacity:.85;">{{siteName}}</div>
+        <h1 style="margin:10px 0 0;font-size:26px;line-height:1.4;">实名认证即将过期</h1>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:34px 36px;">
+        <p style="margin:0 0 16px;font-size:16px;line-height:1.8;">您好，{{ownerName}}：</p>
+        <p style="margin:0 0 22px;font-size:15px;line-height:1.8;color:#4b5563;">您的实名认证信息即将过期，请及时重新认证。</p>
+        <div style="margin-bottom:24px;padding:22px;text-align:center;background:#fff1f2;border:1px solid #fecdd3;border-radius:12px;">
+          <div style="font-size:13px;color:#9f1239;">剩余天数</div>
+          <div style="margin-top:8px;font-size:34px;font-weight:700;color:#e11d48;">{{daysLeft}} 天</div>
+        </div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f8fafc;border-radius:12px;">
+          <tr><td style="padding:14px 18px;color:#64748b;">有效期至</td><td style="padding:14px 18px;text-align:right;font-weight:600;color:#be123c;">{{expiresAt}}</td></tr>
+        </table>
+        <p style="margin:24px 0 0;padding:14px 16px;background:#fff1f2;border-left:4px solid #e11d48;border-radius:8px;font-size:14px;line-height:1.7;color:#9f1239;">过期后将影响应用授权安装与购买，请及时前往个人中心完成重新认证。</p>
+      </td>
+    </tr>
+    <tr><td style="padding:20px 36px;background:#f8fafc;text-align:center;font-size:12px;color:#94a3b8;">此邮件由 {{siteName}} 自动发送，请勿直接回复。</td></tr>
+  </table>
 </div>`
   }
 
   const templateFields = {
     purchase: { content: 'purchaseContent', contentType: 'purchaseContentType' },
     expire: { content: 'expireContent', contentType: 'expireContentType' },
-    opened: { content: 'openedContent', contentType: 'openedContentType' }
+    opened: { content: 'openedContent', contentType: 'openedContentType' },
+    realname: { content: 'realnameExpireContent', contentType: 'realnameExpireContentType' }
   } as const
 
   const variables = [
@@ -537,6 +650,15 @@
     { key: '{{expiresAt}}', label: '到期时间' },
     { key: '{{daysLeft}}', label: '剩余天数' },
     { key: '{{ownerName}}', label: '用户/代理商' },
+    { key: '{{siteName}}', label: '网站名称' }
+  ]
+
+  // 实名提醒不涉及授权信息，只暴露主体与时间相关变量。
+  const realnameVariables = [
+    { key: '{{ownerName}}', label: '用户/代理商' },
+    { key: '{{realName}}', label: '实名姓名' },
+    { key: '{{expiresAt}}', label: '有效期至' },
+    { key: '{{daysLeft}}', label: '剩余天数' },
     { key: '{{siteName}}', label: '网站名称' }
   ]
 
@@ -670,13 +792,8 @@
   }
 
   const appendTemplateVariable = (template: MailTemplateType, value: string) => {
-    if (template === 'purchase') {
-      form.purchaseContent += value
-    } else if (template === 'expire') {
-      form.expireContent += value
-    } else {
-      form.openedContent += value
-    }
+    const fields = templateFields[template]
+    form[fields.content] += value
   }
 
   const renderPreview = (content: string, contentType: 'text' | 'html') => {

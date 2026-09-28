@@ -830,6 +830,17 @@ func UserPurchase(c *gin.Context) {
 		return
 	}
 
+	// 购买前实名门槛：在扣款与建单之前拦截，避免出现已支付但无法开通的订单。
+	// 数据库不可用时直接失败（购买流程本身也依赖同一连接），不给绕过窗口。
+	pdb, derr := openAppPurchaseDB()
+	if derr != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "数据库连接失败"})
+		return
+	}
+	if realnamePurchaseBlocked(c, pdb, "user", int64(userID), "user", int64(userID)) {
+		return
+	}
+
 	validTypes := map[string]bool{"domain": true, "wildcard": true, "ip": true, "key": true}
 	if !validTypes[req.Type] {
 		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "无效的授权类型"})
@@ -1155,7 +1166,12 @@ func UserDashboard(c *gin.Context) {
 
 // UserProfile 获取用户个人信息
 func UserProfile(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+	rawUserID, _ := c.Get("user_id")
+	userID, ok := rawUserID.(uint)
+	if !ok || userID == 0 {
+		c.JSON(http.StatusOK, gin.H{"code": 401, "msg": "认证信息异常"})
+		return
+	}
 
 	db, err := config.DB()
 	if err != nil {
@@ -1180,23 +1196,41 @@ func UserProfile(c *gin.Context) {
 
 	// 实名信息（列可能不存在，容错处理）
 	realName, realIDCard := "", ""
-	var realnameAt sql.NullTime
+	var realnameAt, realnameExpiresAt sql.NullTime
 	if err := ensureRealnameStorage(db); err == nil {
-		_ = db.QueryRow("SELECT real_name, real_id_card, realname_at FROM users WHERE id = ?", userID).Scan(&realName, &realIDCard, &realnameAt)
+		_ = db.QueryRow("SELECT real_name, real_id_card, realname_at, realname_expires_at FROM users WHERE id = ?", userID).Scan(&realName, &realIDCard, &realnameAt, &realnameExpiresAt)
 	}
-	realnameVerified := realnameAt.Valid
 	realnameAtStr := ""
 	if realnameAt.Valid {
 		realnameAtStr = realnameAt.Time.Format("2006-01-02 15:04:05")
 	}
+	realnameExpiresAtStr := ""
+	if realnameExpiresAt.Valid {
+		realnameExpiresAtStr = realnameExpiresAt.Time.Format("2006-01-02 15:04:05")
+	}
 	realnameEnabled := false
 	realnameProvider := ""
 	realnameAuthMode := ""
+	realnameScope := realnameScopeByApp
+	purchaseRealnameRequired := false
+	purchaseCheckOwner := true
+	realnameStatus := realnameStatusOK
+	realnameVerified := realnameAt.Valid
 	if rnCfg, err := loadRealnameConfig(db); err == nil {
 		realnameEnabled = rnCfg.Enabled
 		realnameProvider = rnCfg.Provider
+		realnameScope = rnCfg.Scope
+		purchaseRealnameRequired = rnCfg.Enabled && rnCfg.PluginEnabled && rnCfg.PurchaseRequired
+		purchaseCheckOwner = rnCfg.PurchaseCheckOwner
 		if rnCfg.Provider == realnameProviderXiaomu {
 			realnameAuthMode = rnCfg.XiaomuProductMode
+		} else if rnCfg.Provider == realnameProviderAlipay {
+			realnameAuthMode = rnCfg.AlipayAuthMode
+		}
+		if realnameEnabled {
+			check := checkRealnameForOwner(db, rnCfg, "user", int64(userID))
+			realnameStatus = check.Status
+			realnameVerified = check.Verified
 		}
 	}
 
@@ -1217,10 +1251,16 @@ func UserProfile(c *gin.Context) {
 			"realnameEnabled":  realnameEnabled,
 			"realnameProvider": realnameProvider,
 			"realnameAuthMode": realnameAuthMode,
+			"realnameScope":    realnameScope,
 			"realnameVerified": realnameVerified,
+			"realnameStatus":   realnameStatus,
+			"realnameNotice":   realnamePendingNotice(realnameStatus),
 			"realName":         maskRealName(realName),
 			"realIdCard":       maskIDCard(realIDCard),
 			"realnameAt":       realnameAtStr,
+			"realnameExpiresAt": realnameExpiresAtStr,
+			"purchaseRealnameRequired": purchaseRealnameRequired,
+			"purchaseCheckOwner":       purchaseCheckOwner,
 		},
 	})
 }

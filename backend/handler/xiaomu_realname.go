@@ -624,8 +624,12 @@ func startXiaomuRealname(c *gin.Context, db *sql.DB, cfg realnameConfig, ownerTy
 	if verr != nil {
 		session = applyXiaomuRealnameError(session, verr)
 		_ = insertXiaomuRealnameSession(db, token, session)
-		writeRealnameRecord(db, ownerType, int64(ownerID), realnameProviderXiaomu,
-			req.RealName, req.IDCard, realnameFaceStatusFailed, tencentRealnameRecordFailureReason(session, verr), "", "")
+		// 结果无法确认（unknown）不留 failed 记录，与靓仔查询路径口径一致：
+		// 该状态意味着上游可能已扣费但结果未知，误记为失败会污染记录统计。
+		if session.Status == realnameFaceStatusFailed {
+			writeRealnameRecord(db, ownerType, int64(ownerID), realnameProviderXiaomu,
+				req.RealName, req.IDCard, realnameFaceStatusFailed, tencentRealnameRecordFailureReason(session, verr), "", "")
+		}
 		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": session.FailMsg, "data": realnameFaceFailureData(session)})
 		return
 	}
@@ -639,14 +643,13 @@ func startXiaomuRealname(c *gin.Context, db *sql.DB, cfg realnameConfig, ownerTy
 
 	switch outcome.Status {
 	case realnameFaceStatusPassed:
+		if err := markRealnameVerified(db, ownerType, int64(ownerID), realnameProviderXiaomu,
+			req.RealName, req.IDCard, cfg, outcome.OrderNo, outcome.Score); err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "保存实名认证结果失败，请稍后重试"})
+			return
+		}
 		session.Status = realnameFaceStatusPassed
 		_ = insertXiaomuRealnameSession(db, token, session)
-		_, _ = db.Exec(
-			"UPDATE "+realnameOwnerTable(ownerType)+" SET real_name = ?, real_id_card = ?, realname_at = NOW() WHERE id = ?",
-			session.RealName, session.IDCard, session.UserID,
-		)
-		writeRealnameRecord(db, ownerType, int64(ownerID), realnameProviderXiaomu,
-			req.RealName, req.IDCard, realnameFaceStatusPassed, "", outcome.OrderNo, outcome.Score)
 		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "实名认证成功", "data": realnameFacePassedData(session)})
 		return
 	case realnameFaceStatusFailed:
@@ -771,15 +774,14 @@ func xiaomuRealnameQuery(c *gin.Context, db *sql.DB, cfg realnameConfig, ownerTy
 
 	switch outcome.Status {
 	case realnameFaceStatusPassed:
+		if err := markRealnameVerified(db, ownerType, session.UserID, realnameProviderXiaomu,
+			session.RealName, session.IDCard, cfg, session.OrderNo, outcome.Score); err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "保存实名认证结果失败，请稍后重试"})
+			return
+		}
 		session.Status = realnameFaceStatusPassed
 		session.FailMsg = ""
 		saveRealnameFaceSession(db, token, session)
-		_, _ = db.Exec(
-			"UPDATE "+realnameOwnerTable(ownerType)+" SET real_name = ?, real_id_card = ?, realname_at = NOW() WHERE id = ?",
-			session.RealName, session.IDCard, session.UserID,
-		)
-		writeRealnameRecord(db, ownerType, session.UserID, realnameProviderXiaomu,
-			session.RealName, session.IDCard, realnameFaceStatusPassed, "", session.OrderNo, outcome.Score)
 		c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "实名认证成功", "data": realnameFacePassedData(session)})
 	case realnameFaceStatusFailed:
 		session.Status = realnameFaceStatusFailed
