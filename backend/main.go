@@ -21,9 +21,17 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
+//go:embed sdk
+var sdkFS embed.FS
+
 func main() {
 	r := gin.Default()
 	appStoreServer := appstore.NewServer(handler.NewAppStoreTemplateRepository())
+
+	sdkExamplesFS, err := fs.Sub(sdkFS, "sdk")
+	if err != nil {
+		log.Fatal("failed to load sdk examples:", err)
+	}
 
 	// CORS
 	r.Use(middleware.Cors())
@@ -300,6 +308,8 @@ func main() {
 			secured.DELETE("/promotion/campaigns/:id", handler.AdminPromotionCampaignDelete)
 			secured.GET("/verify-log/list", handler.VerifyLogList)
 			secured.DELETE("/verify-log/clear", handler.VerifyLogClear)
+			// SDK 示例包下载（后台 SDK 示例页）
+			secured.GET("/sdk/:lang/download", handler.AdminSdkDownload(sdkExamplesFS))
 			secured.GET("/agent/list", handler.AgentList)
 			secured.POST("/agent/create", handler.AgentCreate)
 			secured.PUT("/agent/:id", handler.AgentUpdate)
