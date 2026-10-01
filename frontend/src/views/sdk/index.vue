@@ -5,7 +5,8 @@
         <div>
           <h2>SDK 接入示例</h2>
           <p
-            >选择语言后复制示例代码，替换服务地址、appKey、appSecret 和授权目标即可接入授权校验。</p
+            >选择语言后复制示例代码，替换服务地址、appKey、appSecret 和授权目标即可接入授权校验；PHP
+            另提供完整 SDK 包下载。</p
           >
         </div>
         <ElTag type="primary" size="large">License SDK</ElTag>
@@ -51,7 +52,16 @@
               <h3>{{ item.label }}</h3>
               <p>{{ item.desc }}</p>
             </div>
-            <ElButton @click="copyCode(item.code)">复制 {{ item.label }} 代码</ElButton>
+            <div class="example-actions">
+              <ElButton
+                v-if="item.downloadLang"
+                type="primary"
+                :loading="downloading"
+                @click="downloadSdk(item)"
+                >下载 {{ item.label }} SDK</ElButton
+              >
+              <ElButton @click="copyCode(item.code)">复制 {{ item.label }} 代码</ElButton>
+            </div>
           </div>
           <pre><code>{{ item.code }}</code></pre>
         </ElTabPane>
@@ -63,62 +73,41 @@
 <script setup lang="ts">
   import { computed, ref } from 'vue'
   import { ElMessage } from 'element-plus'
+  import { fetchDownloadSdk } from '@/api/sdk'
 
   defineOptions({ name: 'SdkExamples' })
 
-  const sdkExamples = [
+  interface SdkExample {
+    key: string
+    label: string
+    desc: string
+    code: string
+    /** 配置后在示例头部显示 SDK 下载按钮，对应后端 /api/sdk/:lang/download */
+    downloadLang?: string
+  }
+
+  const sdkExamples: SdkExample[] = [
     {
       key: 'php',
       label: 'PHP',
-      desc: '适合 PHP Web 项目，在入口文件或核心控制器中调用。',
+      desc: '适合 PHP Web 项目，在入口文件引入 SDK 即可完成授权守卫。下方为最小接入示例，完整封装（AuthProLicense 类、入口示例、说明文档）请点击右侧按钮下载。',
       code: `<?php
-function v2Sign($appKey, $appSecret, $licenseKey, $domain, $serverIp, $timestamp) {
-    $canonical = implode("\\n", [
-        'v2', $appKey, $licenseKey, $domain, $serverIp, (string)$timestamp,
-    ]);
-    return hash_hmac('sha256', $canonical, $appSecret);
-}
+// 最小接入示例，完整封装请点右上角「下载 PHP SDK」（含 AuthProLicense.php、example.php、README.md）
+require_once __DIR__ . '/AuthProLicense.php';
 
-function verifyLicense() {
-    $baseUrl = 'https://license.example.com';
-    $appKey = 'your_app_key';
-    $appSecret = 'your_app_secret';
-    $serverIp = $_SERVER['SERVER_ADDR'] ?? '';
-    $domain = $_SERVER['HTTP_HOST'] ?? '';
-    $licenseKey = '';
-    $timestamp = time();
-    $sign = v2Sign($appKey, $appSecret, $licenseKey, $domain, $serverIp, $timestamp);
+$sdk = new AuthProLicense(
+    'https://license.example.com', // 授权站地址
+    'your_app_key',                // 应用的 appKey
+    'your_app_secret'              // 应用的 appSecret
+);
 
-    $payload = json_encode([
-        'appKey' => $appKey,
-        'domain' => $domain,
-        'serverIp' => $serverIp,
-        'licenseKey' => $licenseKey,
-        'timestamp' => $timestamp,
-        'signVersion' => 'v2',
-        'sign' => $sign,
-    ]);
-
-    $ch = curl_init($baseUrl . '/api/license/verify');
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_POSTFIELDS => $payload,
-        CURLOPT_TIMEOUT => 8,
-    ]);
-
-    $response = curl_exec($ch);
-    curl_close($ch);
-
-    $data = json_decode($response ?: '{}', true);
-    return ($data['code'] ?? 0) === 200 && ($data['data']['result'] ?? '') === 'pass';
-}
-
-if (!verifyLicense()) {
+// verify($domain, $serverIp, $licenseKey)
+// domain / serverIp 留空自动取当前站点域名与 IP，licenseKey 按授权类型选填
+if (!$sdk->verify()) {
     http_response_code(403);
-    exit('License invalid');
-}`
+    exit('License invalid: ' . $sdk->getLastError());
+}`,
+      downloadLang: 'php'
     },
     {
       key: 'java',
@@ -211,9 +200,9 @@ bool verifyLicense(const std::string& domain, const std::string& serverIp, const
     std::string canonical = "v2\\n" + appKey + "\\n" + licenseKey + "\\n" + domain + "\\n" + serverIp + "\\n" + std::to_string(timestamp);
     std::string sign = hmacSha256Hex(appSecret, canonical);
 
-    std::string body = "{\\"appKey\\":\\"\\"" + appKey + "\\",\\"domain\\":\\"\\"" + domain +
-        "\\",\\"serverIp\\":\\"\\"" + serverIp + "\\",\\"licenseKey\\":\\"\\"" + licenseKey + "\\",\\"timestamp\\":\\"\\"" +
-        std::to_string(timestamp) + ",\\"signVersion\\":\\"\\"v2\\",\\"sign\\":\\"\\"" + sign + "\\"}";
+    std::string body = "{\\"appKey\\":\\"" + appKey + "\\",\\"domain\\":\\"" + domain +
+        "\\",\\"serverIp\\":\\"" + serverIp + "\\",\\"licenseKey\\":\\"" + licenseKey + "\\",\\"timestamp\\":" +
+        std::to_string(timestamp) + ",\\"signVersion\\":\\"v2\\",\\"sign\\":\\"" + sign + "\\"}";
 
     CURL* curl = curl_easy_init();
     std::string response;
@@ -432,6 +421,30 @@ export async function verifyLicense({ domain, serverIp = '', licenseKey = '' }) 
       ElMessage.error('复制失败，请手动复制')
     }
   }
+
+  const downloading = ref(false)
+
+  async function downloadSdk(item: SdkExample) {
+    if (!item.downloadLang || downloading.value) return
+    downloading.value = true
+    let url = ''
+    try {
+      const file = await fetchDownloadSdk(item.downloadLang)
+      url = URL.createObjectURL(file)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `auth-pro-${item.downloadLang}-sdk.zip`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      ElMessage.success('SDK 已开始下载')
+    } catch {
+      // 请求层已提示失败原因；避免把错误 JSON 保存成 zip
+    } finally {
+      if (url) setTimeout(() => URL.revokeObjectURL(url), 1000)
+      downloading.value = false
+    }
+  }
 </script>
 
 <style scoped lang="scss">
@@ -488,6 +501,12 @@ export async function verifyLicense({ domain, serverIp = '', licenseKey = '' }) 
       margin: 0;
       color: var(--el-text-color-secondary);
     }
+  }
+
+  .example-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 12px;
   }
 
   pre {
